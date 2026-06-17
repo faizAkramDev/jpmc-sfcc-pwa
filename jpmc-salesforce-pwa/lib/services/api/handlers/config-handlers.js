@@ -11,6 +11,7 @@ import { getApplePayPreferences } from '../../sfcc/site-preferences'
 import logger from '../../../utils/logger'
 import { extractLocale, extractSlasToken } from '../../../utils/locale-extractor'
 import { GENERIC_API_ERROR_MESSAGE } from '../../../utils/constants/error-constants'
+import { isDefaultLocale } from '../../../utils/site-config.js'
 
 // =============================================================================
 // Configuration
@@ -176,7 +177,6 @@ export const handleGetConfig = async (req, res) => {
                 getKey: (pieBaseUrl && pieKey) ? `${pieBaseUrl}/${pieKey}/getkey.js` : undefined
             },
             // Payment form configuration
-            supportedCardBrands: ['visa', 'mastercard', 'amex', 'discover'],
             captureMethod: config.captureMethod // From BM site preferences (required)
         }
 
@@ -309,26 +309,12 @@ export const handleGetGooglePayConfig = async (req, res) => {
             pdpEnabled,
             allowedShippingCountries,
             
-            // API version
-            apiVersion: 2,
-            apiVersionMinor: 0,
-            
             // AVS setting from BM - used for address verification with JPMC
             enableAVS: config.enableAVS === true || config.enableAVS === 'true',
             
-            // Billing address is always required for SFCC order creation
-            // Note: enableAVS controls whether address is sent to JPMC for verification
-            billingAddressRequired: true,
-            billingAddressParameters: {
-                format: 'FULL',
-                phoneNumberRequired: false
-            },
-            
-            // Email requested
-            emailRequired: true,
-            
-            // Ready flag
-            isConfigured: true
+            // Billing address required for SFCC order creation
+            // SFCC Shopper Orders API requires a billing address
+            billingAddressRequired: true
         }
         
         return res.status(200).json(googlePayConfig)
@@ -355,13 +341,28 @@ export const handleGetGooglePayConfig = async (req, res) => {
  * so we use custom JPMC site preferences for headless/PWA Kit.
  * 
  * NOTE: This is safe client-side config - no secrets (certificates/keys) exposed
+ * 
+ * IMPORTANT: Apple Pay is ONLY supported for the default locale (no multi-locale support)
  */
 export const handleGetApplePayConfig = async (req, res) => {
     try {
+        // Apple Pay: ONLY supported for default locale
+        const locale = req.query?.locale || req.body?.locale
+        
+        if (!isDefaultLocale(locale)) {
+            logger.info(`[JPMC Apple Pay] Apple Pay not available for non-default locale: ${locale}`)
+            return res.status(200).json({
+                success: true,
+                isEnabled: false,
+                isConfigured: false,
+                message: `Apple Pay is only available for the default locale. Current locale: ${locale}`
+            })
+        }
+        
         // Fetch from JPMC custom site preferences
         let applePayPrefs = await getApplePayPreferences()
         
-        // Also get JPMC config for environment setting
+        // Also get JPMC config for environment setting (always use default locale)
         const jpmcConfig = await getServerConfigAsync(req)
         
         // =====================================================================
@@ -433,9 +434,6 @@ export const handleGetApplePayConfig = async (req, res) => {
             supportedNetworks,
             merchantCapabilities,
             
-            // Config source
-            _configSource: configSource,
-            
             // Ready flags
             isEnabled: true,
             isConfigured: true
@@ -443,8 +441,6 @@ export const handleGetApplePayConfig = async (req, res) => {
         
         return res.status(200).json({
             success: true,
-            config: applePayConfig,
-            // Also include top-level fields for easier access
             ...applePayConfig
         })
     } catch (error) {

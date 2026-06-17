@@ -179,11 +179,17 @@ const runAuthorizationFraudCheck = async ({ config, token, card, cardExpiry, acc
     const authFraudResult = await callFraudCheck({ config, fraudPayload: authFraudPayload })
     
     if (!authFraudResult) {
-        logger.warn('[JPMC Authorize] Auth fraud check returned null - failing open')
+        logger.warn('[JPMC Authorize] Auth fraud check returned null - failing open with manual capture')
+        // Create simple indicator for c_jpmcFraudResponse to track unavailability
+        const failOpenIndicator = {
+            status: 'FRAUD_CHECK_UNAVAILABLE',
+            message: 'Fraud check service unavailable - transaction allowed with manual capture required',
+            timestamp: new Date().toISOString()
+        }
         return {
             declined: false,
-            forceManualCapture: shouldForceManualCapture(priorFraudRuleAction),
-            fraudResponse: null
+            forceManualCapture: true, // Force manual capture when fraud check unavailable
+            fraudResponse: failOpenIndicator
         }
     }
 
@@ -218,7 +224,7 @@ const buildVerificationPayload = ({ card, accountHolder, billingAddress, currenc
 
     return {
         merchant: {
-            merchantSoftware: buildMerchantSoftware()
+            merchantSoftware: buildMerchantSoftware(true)
         },
         currency,
         paymentMethodType: {
@@ -748,8 +754,7 @@ export const handleVerify = async (req, res) => {
             fraudRuleAction = fraudResult.fraudRuleAction
         }
 
-        // Log and call JPMC API
-        logger.info('[JPMC Verify] RAW REQUEST:', safeStringify(verificationPayload))
+        logger.debug('[JPMC Verify] RAW REQUEST:', safeStringify(verificationPayload))
 
         const { getAccessToken } = await import('../../auth')
         const accessToken = await getAccessToken(config, false)
@@ -766,7 +771,8 @@ export const handleVerify = async (req, res) => {
         })
 
         const verifyResult = await verifyResponse.json()
-        logger.info('[JPMC Verify] RAW RESPONSE:', safeStringify(verifyResult))
+        
+        logger.debug('[JPMC Verify] RAW RESPONSE:', safeStringify(verifyResult))
 
         if (!verifyResponse.ok) {
             return res.status(verifyResponse.status).json({ success: false, message: GENERIC_API_ERROR_MESSAGE })

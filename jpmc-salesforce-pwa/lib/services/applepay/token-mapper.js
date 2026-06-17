@@ -18,7 +18,7 @@ import {
     INITIATOR_TYPE
 } from '../../utils/constants.mjs'
 import { convertCountryCode } from '../../utils/formatters/country-codes'
-
+import { buildMerchantSoftware } from '../api/helpers/request-helpers'
 // =============================================================================
 // Error Class
 // =============================================================================
@@ -412,11 +412,7 @@ export const buildJPMorganApplePayPayload = (options) => {
         
         // Merchant info (hardcoded values, only MCC from config)
         merchant: {
-            merchantSoftware: {
-                companyName: 'JPMC Plugin',
-                productName: 'JPMC SFCC B2C Cartridge',
-                version: '1.0'
-            },
+            merchantSoftware: buildMerchantSoftware(),
             ...(merchant.merchantCategoryCode && { merchantCategoryCode: merchant.merchantCategoryCode })
         },
         
@@ -486,45 +482,41 @@ export const parseJPMCApplePayResponse = (response) => {
         }
     }
 
-    const isSuccess = response.responseStatus === 'SUCCESS'
-    const isAuthorized = response.transactionState === 'AUTHORIZED'
+    // For 3DS: PENDING state with PERFORM_AUTHENTICATION is a valid "in-progress" response
+    const is3DSRequired = response.responseCode === 'PERFORM_AUTHENTICATION' &&
+        !!response.paymentAuthenticationResult?.authenticationOrchestrationUrl
+
+    const isSuccess = response.responseStatus === 'SUCCESS' &&
+        (response.transactionState === 'AUTHORIZED' || 
+         response.transactionState === 'CLOSED' ||
+         is3DSRequired) // 3DS pending is also a valid success state
 
     // Extract card info from response
     const cardInfo = response.paymentMethodType?.card || {}
 
     return {
-        success: isSuccess && isAuthorized,
+        success: isSuccess,
         
-        // Transaction info
+        // Transaction ID for backend order patching (payment transaction attributes)
         transactionId: response.transactionId,
-        requestId: response.requestId,
-        transactionState: response.transactionState,
-        responseStatus: response.responseStatus,
+        
+        // 3DS fields - needed for requires3DSAuthentication() check
         responseCode: response.responseCode,
-        responseMessage: response.responseMessage,
+        paymentAuthenticationResult: response.paymentAuthenticationResult,
         
-        // Approval info
-        approvalCode: response.approvalCode,
-        
-        // Card info
-        cardType: cardInfo.cardType,
-        cardTypeName: cardInfo.cardTypeName,
-        maskedAccountNumber: cardInfo.maskedAccountNumber,
-        walletProvider: cardInfo.walletProvider,
-        lastFour: cardInfo.maskedAccountNumber?.slice(-4),
-        
-        // Network response
-        networkResponse: cardInfo.networkResponse,
-        
-        // Amount info
+        // Payment details
         amount: response.amount,
-        currency: response.currency,
+        captureMethod: response.captureMethod,
         
-        // Timestamps
-        transactionDate: response.transactionDate,
+        // Card type for 3DS skip logic
+        cardTypeName: cardInfo.cardTypeName,
         
-        // Raw response
-        raw: response
+        // Timestamp for order patching
+        timestamp: response.transactionDate || response._timestamp,
+        
+        // For UI messaging
+        canRetry: !isSuccess,
+        userMessage: isSuccess ? (is3DSRequired ? 'Authentication required' : 'Payment authorized successfully') : 'Payment couldn\'t be processed. Please try again later.'
     }
 }
 

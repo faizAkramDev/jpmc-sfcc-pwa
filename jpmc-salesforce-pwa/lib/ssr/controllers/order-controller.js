@@ -134,14 +134,13 @@ const callSuccessHandler = async (orderNo, jpmcResponse, req) => {
 export async function handleConfirmOrder(req, res, next) {
     try {
         const { orderNo } = req.params
-        const { jpmcResponse, paymentInstrumentId, captureMethod = 'MANUAL', paymentAmount, fraudResponse, kountSessionId } = req.body
+        const { jpmcResponse, paymentInstrumentId, fraudResponse, kountSessionId, paymentAmount, captureMethod } = req.body
 
         if (!validateOrderOrRespond(orderNo, res)) return
 
         const orderApi = new OrderApiClient({ ...controllerConfig.commerceConfig, debug: controllerConfig.debug })
-
         // Step 1: Update order status to 'new'
-        await updateOrderStatusToNew(orderApi, orderNo)
+        const result = await updateOrderStatusToNew(orderApi, orderNo)
 
         // Step 2: Patch order with fraud check attributes (if fraud check was performed)
         let orderFraudPatchResult = null
@@ -162,13 +161,11 @@ export async function handleConfirmOrder(req, res, next) {
         if (jpmcResponse && paymentInstrumentId) {
             paymentInstrumentPatchResult = await patchPaymentInstrument(orderApi, orderNo, paymentInstrumentId, jpmcResponse)
             
-            if (paymentAmount) {
-                paymentTransactionPatchResult = await patchPaymentTransaction(
-                    orderApi, orderNo, paymentInstrumentId, jpmcResponse, paymentAmount, captureMethod
-                )
-            } else {
-                logger.warn('[OrderController] Payment amount not provided - skipping payment transaction patch')
-            }
+            // Patch payment transaction with capture method and amount from request
+            // Use defaults if not provided (paymentAmount defaults to null, captureMethod defaults to 'MANUAL')
+            paymentTransactionPatchResult = await patchPaymentTransaction(
+                orderApi, orderNo, paymentInstrumentId, jpmcResponse, paymentAmount, captureMethod || 'MANUAL'
+            )
         } else if (jpmcResponse && !paymentInstrumentId) {
             logger.warn('[OrderController] Cannot patch - paymentInstrumentId is required')
         }
@@ -204,7 +201,7 @@ export async function handleConfirmOrder(req, res, next) {
 export async function handleFailOrder(req, res, next) {
     try {
         const { orderNo } = req.params
-        const { jpmcResponse, reason, errorCode } = req.body
+        const { reason, errorCode } = req.body
 
         // Validate order number format to prevent path traversal
         const orderValidation = validateOrderNumber(orderNo)
@@ -235,7 +232,7 @@ export async function handleFailOrder(req, res, next) {
         // Call custom failure handler if provided
         if (controllerConfig.onAuthorizationFailure) {
             try {
-                await controllerConfig.onAuthorizationFailure(orderNo, jpmcResponse, reason, req)
+                await controllerConfig.onAuthorizationFailure(orderNo, reason, req)
             } catch (hookError) {
                 logger.warn('[OrderController] Custom failure handler failed:', hookError.message)
             }

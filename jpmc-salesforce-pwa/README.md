@@ -64,6 +64,10 @@ Configure the payment settings in Business Manager:
 
 Set sensitive credentials (private key, certificate) as environment variables in your MRT environment — never in Business Manager.
 
+## Deployment
+
+For environment variables and deployment configuration, refer to the implementation guide
+
 ## Support
 
 This library is fully supported by JPMorgan Chase Payments.

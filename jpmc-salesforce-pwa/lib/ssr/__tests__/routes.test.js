@@ -12,7 +12,7 @@ import {
 } from '../routes'
 
 // Mock all dependencies
-jest.mock('../../services/api-routes', () => ({
+jest.mock('../../services/api', () => ({
     handleAuthorize: jest.fn((req, res, next) => next ? next() : res.json({ success: true })),
     handleGetConfig: jest.fn((req, res, next) => next ? next() : res.json({ success: true })),
     handleGetGooglePayConfig: jest.fn((req, res, next) => next ? next() : res.json({ success: true })),
@@ -175,83 +175,6 @@ describe('routes.js', () => {
                 success: false,
                 error: "Payment couldn't be processed. Please try again later."
             })
-        })
-    })
-
-    describe('registerJPMCRoutes', () => {
-        it('registers all basic routes', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app)
-
-            // Config routes
-            expect(app.get).toHaveBeenCalledWith('/api/jpmorgan/config', expect.any(Function))
-            expect(app.post).toHaveBeenCalledWith('/api/jpmorgan/config', expect.any(Function))
-
-            // Google Pay config routes
-            expect(app.get).toHaveBeenCalledWith('/api/jpmorgan/googlepay/config', expect.any(Function))
-            expect(app.post).toHaveBeenCalledWith('/api/jpmorgan/googlepay/config', expect.any(Function))
-
-            // Payment routes
-            expect(app.post).toHaveBeenCalledWith('/api/jpmorgan/authorize', expect.any(Function))
-            expect(app.post).toHaveBeenCalledWith('/api/jpmorgan/verify', expect.any(Function))
-
-            // Available payment methods
-            expect(app.get).toHaveBeenCalledWith('/api/jpmorgan/available-payment-methods', expect.any(Function))
-        })
-
-        it('uses custom basePath', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app, { basePath: '/custom/path' })
-
-            expect(app.get).toHaveBeenCalledWith('/custom/path/config', expect.any(Function))
-            expect(app.post).toHaveBeenCalledWith('/custom/path/authorize', expect.any(Function))
-        })
-
-        it('applies rate limiting by default', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app)
-
-            expect(applyRateLimiting).toHaveBeenCalledWith(
-                app,
-                '/api/jpmorgan',
-                { windowMs: 60000, max: 5 }
-            )
-        })
-
-        it('skips rate limiting when disabled', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app, { enableRateLimit: false })
-
-            expect(applyRateLimiting).not.toHaveBeenCalled()
-        })
-
-        it('logs when debug is enabled', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app, { debug: true })
-
-            expect(logger.info).toHaveBeenCalledWith(
-                expect.stringContaining('[JPMC Routes]'),
-                expect.anything()
-            )
-        })
-
-        it('uses custom rate limit options', () => {
-            const app = createMockApp()
-
-            registerJPMCRoutes(app, {
-                rateLimitOptions: { windowMs: 120000, max: 10 }
-            })
-
-            expect(applyRateLimiting).toHaveBeenCalledWith(
-                app,
-                '/api/jpmorgan',
-                { windowMs: 120000, max: 10 }
-            )
         })
     })
 

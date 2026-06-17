@@ -24,6 +24,11 @@ jest.mock('../../../../utils/locale-extractor', () => ({
     extractSlasToken: jest.fn()
 }))
 
+// Mock site-config
+jest.mock('../../../../utils/site-config', () => ({
+    isDefaultLocale: jest.fn().mockReturnValue(true) // Default: allow Apple Pay
+}))
+
 // Mock useAvailablePaymentMethods
 jest.mock('../../../../hooks/useAvailablePaymentMethods', () => ({
     checkAvailablePaymentMethods: jest.fn()
@@ -35,6 +40,7 @@ jest.mock('../../../../ssr/index.js', () => ({
 }))
 
 import { extractSlasToken } from '../../../../utils/locale-extractor'
+import { isDefaultLocale } from '../../../../utils/site-config'
 import { checkAvailablePaymentMethods } from '../../../../hooks/useAvailablePaymentMethods'
 import { getJPMCConfigAsync } from '../../../../ssr/index.js'
 
@@ -231,27 +237,53 @@ describe('Payment Methods Handler', () => {
             )
         })
 
-        it('should pass locale and slasToken to getJPMCConfigAsync', async () => {
-            mockReq.query = { basketId: 'basket-123', locale: 'en-GB' }
+        it('should disable Apple Pay for non-default locales', async () => {
+            mockReq.query = { basketId: 'basket-123', locale: 'en-CA' }
+            // Mock isDefaultLocale to return false for en-CA
+            isDefaultLocale.mockReturnValueOnce(false)
 
             await handleGetAvailablePaymentMethods(mockReq, mockRes)
 
-            expect(getJPMCConfigAsync).toHaveBeenCalledWith({
-                locale: 'en-GB',
-                slasToken: 'slas-token-123'
+            expect(mockRes.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    success: true,
+                    isApplePayActive: false // Disabled for non-default locale
+                })
+            )
+        })
+
+        it('should enable Apple Pay for default locale', async () => {
+            mockReq.query = { basketId: 'basket-123', locale: 'en-US' }
+            // Mock isDefaultLocale to return true for en-US (the default)
+            isDefaultLocale.mockReturnValueOnce(true)
+            getJPMCConfigAsync.mockResolvedValue({
+                applePayEnabled: true
             })
+
+            await handleGetAvailablePaymentMethods(mockReq, mockRes)
+
+            expect(mockRes.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    success: true,
+                    isApplePayActive: true
+                })
+            )
         })
 
         it('should use locale from body if not in query', async () => {
             mockReq.query = { basketId: 'basket-123' }
             mockReq.body = { locale: 'de-DE' }
+            // Mock isDefaultLocale to return false for de-DE
+            isDefaultLocale.mockReturnValueOnce(false)
 
             await handleGetAvailablePaymentMethods(mockReq, mockRes)
 
-            expect(getJPMCConfigAsync).toHaveBeenCalledWith({
-                locale: 'de-DE',
-                slasToken: 'slas-token-123'
-            })
+            // Apple Pay should be disabled for non-default locale
+            expect(mockRes.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    isApplePayActive: false
+                })
+            )
         })
 
         it('should continue on config error and not override applePayActive', async () => {
@@ -268,16 +300,14 @@ describe('Payment Methods Handler', () => {
             )
         })
 
-        it('should include payment methods in response', async () => {
+        it('should return availability flags in response', async () => {
             await handleGetAvailablePaymentMethods(mockReq, mockRes)
 
             expect(mockRes.json).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    paymentMethods: [
-                        { id: 'CREDIT_CARD', name: 'Credit Card', description: undefined },
-                        { id: 'DW_GOOGLE_PAY', name: 'Google Pay', description: undefined },
-                        { id: 'DW_APPLE_PAY', name: 'Apple Pay', description: undefined }
-                    ]
+                    isCreditCardActive: true,
+                    isGooglePayActive: true,
+                    isApplePayActive: true
                 })
             )
         })
@@ -307,7 +337,9 @@ describe('Payment Methods Handler', () => {
                     success: true,
                     isCreditCardActive: false,
                     isGooglePayActive: false,
-                    paymentMethods: []
+                    creditCardPaymentMethodId: null,
+                    googlePayPaymentMethodId: null,
+                    applePayPaymentMethodId: null
                 })
             )
         })
@@ -377,7 +409,7 @@ describe('Payment Methods Handler', () => {
             )
         })
 
-        it('should include payment method description if available', async () => {
+        it('should include payment method ids in response', async () => {
             mockFetch.mockResolvedValue({
                 ok: true,
                 json: async () => ({
@@ -391,9 +423,7 @@ describe('Payment Methods Handler', () => {
 
             expect(mockRes.json).toHaveBeenCalledWith(
                 expect.objectContaining({
-                    paymentMethods: [
-                        { id: 'CREDIT_CARD', name: 'Credit Card', description: 'Pay with credit card' }
-                    ]
+                    creditCardPaymentMethodId: 'CREDIT_CARD'
                 })
             )
         })

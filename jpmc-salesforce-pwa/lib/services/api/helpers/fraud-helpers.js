@@ -124,7 +124,7 @@ export const buildFraudCheckPayload = ({
         paymentMethodType: {
             card: buildCardForFraud(card, resolvedAccountNumberType)
         },
-        merchant: buildMerchant(config),
+        merchant: buildMerchant(config, true),
         fraudScore: {
             isFraudRuleReturn: true,
             ...(userAgent && { cardholderBrowserInformation: userAgent }),

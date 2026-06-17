@@ -620,10 +620,7 @@ export const useApplePay = (options = {}) => {
             method: 'POST',
             headers,
             body: JSON.stringify({
-                validationURL,
-                merchantId,
-                merchantName,
-                domain: globalThis.location.hostname
+                validationURL
             })
         })
 
@@ -636,7 +633,7 @@ export const useApplePay = (options = {}) => {
         }
 
         return await response.json()
-    }, [apiBasePath, sessionValidationEndpoint, merchantId, merchantName, locale])
+    }, [apiBasePath, sessionValidationEndpoint, locale])
 
     // =============================================================================
     // Payment Authorization

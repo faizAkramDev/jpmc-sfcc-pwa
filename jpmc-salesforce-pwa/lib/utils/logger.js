@@ -7,6 +7,48 @@
  * @module utils/logger
  */
 
+import crypto from 'crypto'
+
+/**
+ * Token fields that should use SHA-256 fingerprinting instead of substring masking
+ * These fields contain tokens/credentials that must be protected more securely
+ */
+const TOKEN_FIELDS = [
+    'accessToken',
+    'access_token',
+    'refreshToken',
+    'refresh_token',
+    'client_assertion',
+    'slasToken',
+    'authorization',
+    'token',
+    'paymentToken'
+]
+
+/**
+ * Generate SHA-256 fingerprint of a token
+ * Used instead of substring masking for better security
+ * to prevent partial token exposure in logs
+ * 
+ * @param {string} token - Token to fingerprint
+ * @returns {string} SHA256 fingerprint in format "sha256:hexdigest"
+ */
+const generateTokenFingerprint = (token) => {
+    if (!token || typeof token !== 'string') return '****'
+    try {
+        const hash = crypto.createHash('sha256').update(token).digest('hex')
+        return `sha256:${hash.substring(0, 16)}`
+    } catch {
+        return '****'
+    }
+}
+
+/**
+ * Check if a key is a token field
+ */
+const isTokenField = (key) =>
+    TOKEN_FIELDS.some(field => field.toLowerCase() === key.toLowerCase())
+
 /**
  * List of sensitive fields to mask in logs
  * These fields will have their values partially masked (first 4 chars shown)
@@ -138,8 +180,12 @@ const isSensitiveKey = (key) =>
 /**
  * Mask a sensitive string value
  */
-const maskSensitiveString = (value) => 
-    value.length > 4 ? `${value.substring(0, 4)}****` : '****'
+const maskSensitiveString = (key, value) => {
+    if (isTokenField(key)) {
+        return generateTokenFingerprint(value)
+    }
+    return value.length > 4 ? `${value.substring(0, 4)}****` : '****'
+}
 
 /**
  * Mask a sensitive number value
@@ -156,7 +202,7 @@ const maskKeyValue = (key, value) => {
     if (!isSensitiveKey(key)) {
         return typeof value === 'object' ? maskObject(value) : value
     }
-    if (typeof value === 'string') return maskSensitiveString(value)
+    if (typeof value === 'string') return maskSensitiveString(key, value)
     if (typeof value === 'number') return maskSensitiveNumber(value)
     return typeof value === 'object' ? maskObject(value) : value
 }
@@ -210,6 +256,13 @@ const formatArgs = (args) => {
  */
 const logger = {
     /**
+     * Check if debug mode is enabled via JPMC_DEBUG environment variable
+     * Debug-level gating: Raw request/response logs are only output when enabled
+     * Set JPMC_DEBUG=true to include raw request and response bodies in logs
+     */
+    isDebugEnabled: () => process.env.JPMC_DEBUG === 'true',
+
+    /**
      * Log info message (masked)
      * @param {...any} args - Arguments to log
      */
@@ -238,12 +291,20 @@ const logger = {
     
     /**
      * Log debug message (masked)
+     * Only logs if JPMC_DEBUG environment variable is set to 'true'
+     * 
+     * Debug-level gating: Raw request/response logs are only output when enabled
+     * Set JPMC_DEBUG=true to include raw request and response bodies in logs
+     * 
      * @param {...any} args - Arguments to log
      */
     debug: (...args) => {
+        if (!logger.isDebugEnabled()) {
+            return
+        }
         const maskedArgs = formatArgs(args)
         // eslint-disable-next-line no-console
-        console.debug(...maskedArgs)
+        console.debug('[DEBUG]', ...maskedArgs)
     },
     
     /**

@@ -8,6 +8,7 @@ import logger from '../../../utils/logger'
 import { extractSlasToken } from '../../../utils/locale-extractor'
 import { checkAvailablePaymentMethods } from '../../../hooks/useAvailablePaymentMethods'
 import { getJPMCConfigAsync } from '../../../ssr/index.js'
+import { isDefaultLocale } from '../../../utils/site-config.js'
 
 /**
  * GET /api/jpmorgan/available-payment-methods
@@ -62,7 +63,6 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
                 creditCardPaymentMethodId: null,
                 googlePayPaymentMethodId: null,
                 applePayPaymentMethodId: null,
-                paymentMethods: [],
                 warning: 'No authorization - using defaults'
             })
         }
@@ -82,7 +82,6 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
                 creditCardPaymentMethodId: null,
                 googlePayPaymentMethodId: null,
                 applePayPaymentMethodId: null,
-                paymentMethods: [],
                 warning: 'Missing SFCC configuration - using defaults'
             })
         }
@@ -116,7 +115,6 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
                 creditCardPaymentMethodId: null,
                 googlePayPaymentMethodId: null,
                 applePayPaymentMethodId: null,
-                paymentMethods: [],
                 warning: `SFCC API error ${response.status} - using defaults`
             })
         }
@@ -127,18 +125,26 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
         // Analyze payment methods using our utility
         const availability = checkAvailablePaymentMethods(paymentMethods)
         
-        // Check JPMCApplePayEnabled site preference — if explicitly false, override
-        // Support multi-locale: pass locale and SLAS token for Custom Object lookup
+        // Apple Pay: ONLY enabled for default locale (no multi-locale support)
+        // Check if the requested locale is the default locale from site configuration
         let applePayActive = availability.isApplePayActive
-        try {
-            const locale = req.query?.locale || req.body?.locale
-            const jpmcConfig = await getJPMCConfigAsync({ locale, slasToken })
-            if (jpmcConfig.applePayEnabled === false) {
-                logger.info('[PaymentMethods] JPMCApplePayEnabled is false in BM — overriding isApplePayActive to false')
-                applePayActive = false
+        const locale = req.query?.locale || req.body?.locale
+        
+        if (!isDefaultLocale(locale)) {
+            // Non-default locale: Apple Pay is NOT supported
+            logger.info(`[PaymentMethods] Apple Pay disabled for non-default locale: ${locale}`)
+            applePayActive = false
+        } else {
+            // Default locale or no locale specified: Check site preference
+            try {
+                const jpmcConfig = await getJPMCConfigAsync({ slasToken })
+                if (jpmcConfig.applePayEnabled === false) {
+                    logger.info('[PaymentMethods] JPMCApplePayEnabled is false in BM — overriding isApplePayActive to false')
+                    applePayActive = false
+                }
+            } catch (configErr) {
+                logger.warn('[PaymentMethods] Could not load JPMC config for applePayEnabled check:', configErr.message)
             }
-        } catch (configErr) {
-            logger.warn('[PaymentMethods] Could not load JPMC config for applePayEnabled check:', configErr.message)
         }
         
         logger.info('[PaymentMethods] Analyzed:', {
@@ -159,12 +165,7 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
             // Include the actual payment method IDs for dynamic use
             creditCardPaymentMethodId: availability.creditCardPaymentMethodId,
             googlePayPaymentMethodId: availability.googlePayPaymentMethodId,
-            applePayPaymentMethodId: availability.applePayPaymentMethodId,
-            paymentMethods: paymentMethods.map(pm => ({
-                id: pm.id,
-                name: pm.name,
-                description: pm.description
-            }))
+            applePayPaymentMethodId: availability.applePayPaymentMethodId
         })
         
     } catch (error) {

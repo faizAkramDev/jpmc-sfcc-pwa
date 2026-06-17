@@ -90,8 +90,13 @@ jest.mock('../../../utils/logger.js', () => ({
 }))
 
 jest.mock('../../../utils/locale-extractor.js', () => ({
-    extractLocale: jest.fn().mockReturnValue('en_US'),
+    extractLocale: jest.fn().mockReturnValue(undefined), // Default: no locale specified
     extractSlasToken: jest.fn().mockReturnValue(null)
+}))
+
+jest.mock('../../../utils/site-config.js', () => ({
+    isDefaultLocale: jest.fn().mockReturnValue(true), // Default: allow Apple Pay
+    getDefaultLocale: jest.fn().mockReturnValue('en-US')
 }))
 
 // Mock global fetch
@@ -101,6 +106,8 @@ import { validateMerchant } from '../../../services/applepay/session.js'
 import { buildJPMorganApplePayPayload, parseJPMCApplePayResponse } from '../../../services/applepay/token-mapper.js'
 import { getJPMCConfigAsync } from '../../index.js'
 import { getAccessToken, clearTokenCache } from '../../../services/auth/oauth-service.js'
+import { extractLocale } from '../../../utils/locale-extractor.js'
+import { isDefaultLocale } from '../../../utils/site-config.js'
 
 // Helper to create mock request/response
 const createMockReqRes = (overrides = {}) => {
@@ -219,6 +226,8 @@ describe('applepay-controller', () => {
                 req: {
                     body: {
                         validationURL: 'https://apple-pay-gateway.apple.com/validate',
+                        // Client-provided values are intentionally ignored for security
+                        // The server uses BM config instead
                         domain: 'example.com',
                         merchantId: 'merchant.test',
                         merchantName: 'Test Store'
@@ -228,11 +237,13 @@ describe('applepay-controller', () => {
 
             await handleApplePaySession(req, res, next)
 
+            // Server resolves merchant identity from BM config, ignoring client values
+            // This prevents client-side override of merchant configuration
             expect(validateMerchant).toHaveBeenCalledWith(expect.objectContaining({
                 validationURL: 'https://apple-pay-gateway.apple.com/validate',
-                merchantId: 'merchant.test',
-                merchantName: 'Test Store',
-                domain: 'example.com'
+                merchantId: 'merchant.test.applepay',  // From BM config, not client
+                merchantName: 'Test Merchant',          // From BM config, not client
+                domain: 'example.com'                   // From req.hostname, not client
             }))
             expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
                 merchantSessionIdentifier: 'session123'
@@ -255,6 +266,52 @@ describe('applepay-controller', () => {
                     code: 'INVALID_CONFIG',
                     message: 'validationURL is required'
                 })
+            }))
+        })
+
+        it('rejects non-default locale requests', async () => {
+            // Mock isDefaultLocale to return false (non-default locale)
+            isDefaultLocale.mockReturnValueOnce(false)
+
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: {
+                        validationURL: 'https://apple-pay-gateway.apple.com/validate'
+                    }
+                }
+            })
+
+            await handleApplePaySession(req, res, next)
+
+            expect(res.status).toHaveBeenCalledWith(400)
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: false,
+                error: expect.objectContaining({
+                    code: 'INVALID_CONFIG',
+                    message: expect.stringContaining('default locale')
+                })
+            }))
+        })
+
+        it('accepts default locale requests', async () => {
+            // Mock isDefaultLocale to return true (default locale)
+            isDefaultLocale.mockReturnValueOnce(true)
+
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: {
+                        validationURL: 'https://apple-pay-gateway.apple.com/validate',
+                        merchantId: 'merchant.test',
+                        merchantName: 'Test Store'
+                    }
+                }
+            })
+
+            await handleApplePaySession(req, res, next)
+
+            expect(validateMerchant).toHaveBeenCalled()
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                merchantSessionIdentifier: 'session123'
             }))
         })
 
@@ -437,6 +494,54 @@ describe('applepay-controller', () => {
                 error: expect.objectContaining({
                     code: 'TOKEN_MISSING'
                 })
+            }))
+        })
+
+        it('rejects non-default locale requests', async () => {
+            // Mock isDefaultLocale to return false (non-default locale)
+            isDefaultLocale.mockReturnValueOnce(false)
+
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: {
+                        applePayToken: { paymentData: 'encrypted-data' },
+                        amount: '99.99',
+                        currency: 'USD'
+                    }
+                }
+            })
+
+            await handleApplePayAuthorize(req, res, next)
+
+            expect(res.status).toHaveBeenCalledWith(400)
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: false,
+                error: expect.objectContaining({
+                    code: 'LOCALE_NOT_SUPPORTED',
+                    message: expect.stringContaining('default locale')
+                })
+            }))
+        })
+
+        it('accepts default locale requests', async () => {
+            // Mock isDefaultLocale to return true (default locale)
+            isDefaultLocale.mockReturnValueOnce(true)
+
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: {
+                        applePayToken: { paymentData: 'encrypted-data' },
+                        amount: '99.99',
+                        currency: 'USD'
+                    }
+                }
+            })
+
+            await handleApplePayAuthorize(req, res, next)
+
+            expect(buildJPMorganApplePayPayload).toHaveBeenCalled()
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: true
             }))
         })
 
@@ -644,6 +749,41 @@ describe('applepay-controller', () => {
     })
 
     describe('handleApplePayConfig', () => {
+        it('rejects non-default locale requests', async () => {
+            // Mock isDefaultLocale to return false (non-default locale)
+            isDefaultLocale.mockReturnValueOnce(false)
+
+            const { req, res } = createMockReqRes()
+
+            await handleApplePayConfig(req, res)
+
+            expect(res.status).toHaveBeenCalledWith(200)
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                success: false,
+                isConfigured: false,
+                message: expect.stringContaining('default locale')
+            }))
+        })
+
+        it('accepts default locale requests', async () => {
+            // Mock isDefaultLocale to return true (default locale)
+            isDefaultLocale.mockReturnValueOnce(true)
+
+            getJPMCConfigAsync.mockResolvedValueOnce({
+                applePayMerchantId: 'merchant.test',
+                applePayMerchantName: 'Test Store'
+            })
+
+            const { req, res } = createMockReqRes()
+
+            await handleApplePayConfig(req, res)
+
+            expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+                merchantId: 'merchant.test',
+                merchantName: 'Test Store'
+            }))
+        })
+
         it('returns merged config from BM and controller', async () => {
             getJPMCConfigAsync.mockResolvedValueOnce({
                 applePayMerchantId: 'merchant.from.bm',

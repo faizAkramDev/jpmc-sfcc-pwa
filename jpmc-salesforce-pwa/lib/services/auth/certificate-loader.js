@@ -89,7 +89,7 @@ export const loadCertificate = (config) => {
         
         // Cache the result
         _cache.certificates.set(cacheKey, certContent)
-        logger.info('[Certificate] Certificate cached for clientId:', cacheKey)
+        logger.debug('[Certificate] Certificate loaded and cached')
         
         return certContent
     } catch (error) {
@@ -145,7 +145,7 @@ export const loadPrivateKey = (config) => {
         
         // Cache the result
         _cache.privateKeys.set(cacheKey, keyContent)
-        logger.info('[Certificate] Private key cached for clientId:', cacheKey)
+        logger.debug('[Certificate] Private key loaded and cached')
         
         return keyContent
     } catch (error) {
@@ -213,9 +213,7 @@ export const getCertificateThumbprints = (config = null) => {
         
         // Cache the result
         _cache.thumbprints.set(cacheKey, thumbprints)
-        logger.info('[Certificate] Thumbprints calculated and cached:')
-        logger.info('[Certificate]   Hex (kid):', hexThumbprint)
-        logger.info('[Certificate]   Base64url (x5t):', base64UrlThumbprint)
+        logger.debug('[Certificate] Thumbprints calculated and cached')
         
         return thumbprints
     } catch (error) {

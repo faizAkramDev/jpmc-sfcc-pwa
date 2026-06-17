@@ -80,8 +80,8 @@ export const createPayment = async ({ accessToken, config, paymentData }) => {
     const headers = buildJPMCHeaders({ merchantId, platformId, requestId, accessToken: token })
     // Prepare the raw request body that will be sent to JPMC
     const rawRequestBody = JSON.stringify(requestBody)
-    logger.info('[Payment API] RAW REQUEST:', safeStringify(requestBody))
-    // Log raw request
+    
+    logger.debug('[Payment API] RAW REQUEST:', safeStringify(requestBody))
 
     try {
         let response = await fetch(url, {
@@ -117,8 +117,7 @@ export const createPayment = async ({ accessToken, config, paymentData }) => {
         data._requestId = requestId
         data._timestamp = new Date().toISOString()
 
-        // Log raw response
-        logger.info('[Payment API] RAW RESPONSE:', safeStringify(data))
+        logger.debug('[Payment API] RAW RESPONSE:', safeStringify(data))
         
         if (!response.ok) {
             logger.error('[Payment API] Payment FAILED - Full details above')

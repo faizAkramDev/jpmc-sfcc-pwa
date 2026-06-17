@@ -115,13 +115,8 @@ const CUSTOM_OBJECT_ATTRIBUTE_MAPPING = {
     kountClientId: 'kountClientId',
     kountEnvironment: 'kountEnvironment',
 
-    // Apple Pay Configuration
-    applePayEnabled: 'applePayEnabled',
-    applePayMerchantId: 'applePayMerchantId',
-    applePayMerchantName: 'applePayMerchantName',
-    applePayCountryCode: 'applePayCountryCode',
-    applePaySupportedNetworks: 'applePaySupportedNetworks',
-    applePayMerchantCapabilities: 'applePayMerchantCapabilities',
+    // NOTE: Apple Pay is NOT supported in Custom Objects (no multi-locale support)
+    // Apple Pay configuration is only read from Site Preferences for the default locale
 
     // 3D Secure Configuration
     jpmc3DSEnabled: 'jpmc3DSEnabled'
@@ -210,28 +205,14 @@ const fetchCustomObjectFromAPI = async (objectKey, slasToken, sfccConfig) => {
         'Content-Type': 'application/json'
     }
 
-    // Log raw request details
-    logger.info('\n========== SCAPI CUSTOM OBJECT RAW REQUEST ==========')
-    logger.info('Method: GET')
-    logger.info('URL:', apiUrl)
-    logger.info('Headers:', JSON.stringify({
-        ...requestHeaders,
-        Authorization: `Bearer ${slasToken.substring(0, 20)}...${slasToken.substring(slasToken.length - 10)}`
-    }, null, 2))
-    logger.info('======================================================\n')
 
     const response = await fetch(apiUrl, {
         method: 'GET',
         headers: requestHeaders
     })
 
-    // Log raw response details
     const responseBody = await response.text()
-    logger.info('\n========== SCAPI CUSTOM OBJECT RAW RESPONSE ==========')
-    logger.info('Status:', response.status, response.statusText)
-    logger.info('Response Headers:', JSON.stringify(Object.fromEntries(response.headers.entries()), null, 2))
-    logger.info('Response Body:', responseBody)
-    logger.info('=======================================================\n')
+    
 
     // 404 = Custom Object doesn't exist for this locale (not an error)
     if (response.status === 404) {

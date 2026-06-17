@@ -21,6 +21,7 @@ import { buildJPMCHeaders } from '../../utils/http/http-client.js'
 import logger from '../../utils/logger.js'
 import { extractLocale, extractSlasToken } from '../../utils/locale-extractor.js'
 import { GENERIC_API_ERROR_MESSAGE } from '../../utils/constants/error-constants'
+import { isDefaultLocale } from '../../utils/site-config.js'
 
 // =============================================================================
 // Request Helpers (Multi-Locale Support)
@@ -180,6 +181,8 @@ const loadCertificates = async () => {
  * event fires. It validates the merchant with Apple's servers using the
  * merchant identity certificate.
  * 
+ * IMPORTANT: Apple Pay is ONLY supported for the default locale (no multi-locale support)
+ * 
  * POST /api/jpmorgan/applepay/session
  * 
  * @param {Object} req - Express request
@@ -188,7 +191,20 @@ const loadCertificates = async () => {
  */
 export const handleApplePaySession = async (req, res, next) => {
     try {
-        const { validationURL, domain, merchantId: bodyMerchantId, merchantName: bodyMerchantName } = req.body
+        // Apple Pay: ONLY supported for default locale
+        const locale = extractLocale(req)
+        if (!isDefaultLocale(locale)) {
+            logger.info(`[ApplePay Session] Rejected: Apple Pay not available for non-default locale: ${locale}`)
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: APPLE_PAY_ERROR_CODES.INVALID_CONFIG,
+                    message: `Apple Pay is only available for the default locale. Current locale: ${locale}`
+                }
+            })
+        }
+        
+        const { validationURL } = req.body
         
         if (!validationURL) {
             return res.status(400).json({
@@ -212,18 +228,16 @@ export const handleApplePaySession = async (req, res, next) => {
             })
         }
 
-        // Resolve merchantId: client sends it from BM prefs (most authoritative),
-        // fall back to live BM fetch, then to env-var static config.
-        let resolvedMerchantId = bodyMerchantId || applePayConfig.merchantId
-        let resolvedMerchantName = bodyMerchantName || applePayConfig.merchantName
-        if (!resolvedMerchantId) {
-            try {
-                const jpmcConfig = await getConfigForRequest(req)
-                resolvedMerchantId = jpmcConfig.applePayMerchantId || null
-                resolvedMerchantName = resolvedMerchantName || jpmcConfig.applePayMerchantName || applePayConfig.merchantName
-            } catch (_err) {
-                // BM fetch failed — will fail below with helpful message
-            }
+        // Resolve merchantId and merchantName from server-side configuration only
+        // Priority: BM fetch > env-var static config (no client-side override)
+        let resolvedMerchantId = applePayConfig.merchantId
+        let resolvedMerchantName = applePayConfig.merchantName
+        try {
+            const jpmcConfig = await getConfigForRequest(req)
+            resolvedMerchantId = jpmcConfig.applePayMerchantId || resolvedMerchantId
+            resolvedMerchantName = jpmcConfig.applePayMerchantName || resolvedMerchantName
+        } catch (_err) {
+            // BM fetch failed — continue with env-var static config
         }
 
         if (applePayConfig.debug) {
@@ -238,7 +252,7 @@ export const handleApplePaySession = async (req, res, next) => {
             validationURL,
             merchantId: resolvedMerchantId,
             merchantName: resolvedMerchantName,
-            domain: domain || req.hostname,
+            domain: req.hostname,
             merchantIdentityCert: certs.cert,
             merchantIdentityKey: certs.key,
             merchantIdentityPassphrase: certs.passphrase
@@ -373,6 +387,8 @@ const callJPMCWithRetry = async ({ jpmcConfig, jpmcPayload, accessToken }) => {
  * This endpoint receives the Apple Pay token from the client and
  * sends it to JP Morgan's Online Payments API for authorization.
  * 
+ * IMPORTANT: Apple Pay is ONLY supported for the default locale (no multi-locale support)
+ * 
  * POST /api/jpmorgan/applepay/authorize
  * 
  * @param {Object} req - Express request
@@ -381,6 +397,19 @@ const callJPMCWithRetry = async ({ jpmcConfig, jpmcPayload, accessToken }) => {
  */
 export const handleApplePayAuthorize = async (req, res, next) => {
     try {
+        // Apple Pay: ONLY supported for default locale
+        const locale = extractLocale(req)
+        if (!isDefaultLocale(locale)) {
+            logger.info(`[ApplePay Authorize] Rejected: Apple Pay not available for non-default locale: ${locale}`)
+            return res.status(400).json({
+                success: false,
+                error: {
+                    code: 'LOCALE_NOT_SUPPORTED',
+                    message: `Apple Pay is only available for the default locale. Current locale: ${locale}`
+                }
+            })
+        }
+        
         const jpmcConfig = await getConfigForRequest(req)
         const { applePayToken, amount, currency, merchantOrderNumber, billingContact, shippingContact } = req.body
         const captureMethod = req.body.captureMethod || jpmcConfig.captureMethod
@@ -396,7 +425,7 @@ export const handleApplePayAuthorize = async (req, res, next) => {
             applePayToken, amount: Math.round(Number.parseFloat(amount) * 100), currency,
             merchantOrderNumber, billingContact, shippingContact,
             latLong: APPLE_PAY_DEFAULTS.latLong, captureMethod,
-            merchant: { companyName: 'JPMC Plugin', productName: 'JPMC SFCC B2C Cartridge', version: '1.0',
+            merchant: {
                 ...(jpmcConfig.merchantCategoryCode && { merchantCategoryCode: jpmcConfig.merchantCategoryCode }) }
         })
 
@@ -427,10 +456,23 @@ export const handleApplePayAuthorize = async (req, res, next) => {
  * Returns client-safe Apple Pay configuration, merging BM site preferences
  * (applePayMerchantId, applePayCountryCode, etc.) with env-var defaults.
  * 
+ * IMPORTANT: Apple Pay is ONLY supported for the default locale (no multi-locale support)
+ * 
  * GET /api/jpmorgan/applepay/config
  */
 export const handleApplePayConfig = async (req, res) => {
     try {
+        // Apple Pay: ONLY supported for default locale
+        const locale = extractLocale(req)
+        if (!isDefaultLocale(locale)) {
+            logger.info(`[ApplePay Config] Rejected: Apple Pay not available for non-default locale: ${locale}`)
+            return res.status(200).json({
+                success: false,
+                isConfigured: false,
+                message: `Apple Pay is only available for the default locale. Current locale: ${locale}`
+            })
+        }
+        
         const jpmcConfig = await getConfigForRequest(req)
 
         // BM strings like "visa,masterCard" → array; fall back to env-var arrays

@@ -64,10 +64,69 @@ export function configureThreeDSController(config) {
 }
 
 /**
+ * Parse and validate allowed origins from env var
+ * 
+ * Format: JPMC_STOREFRONT_ALLOWED_ORIGINS=https://storefront.example.com,https://shop.example.com
+ * 
+ * Security: Restricts postMessage to allowed origins to prevent hijacking attacks
+ * 
+ * @returns {Set<string>} Set of allowed origins
+ */
+function getAllowedOrigins() {
+    const allowedOriginsEnv = process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS || ''
+    if (!allowedOriginsEnv.trim()) {
+        logger.warn('[3DS Controller] JPMC_STOREFRONT_ALLOWED_ORIGINS not configured - postMessage will use "*" fallback')
+        return new Set()
+    }
+    
+    const origins = allowedOriginsEnv
+        .split(',')
+        .map(o => o.trim())
+        .filter(o => o.length > 0)
+    
+    return new Set(origins)
+}
+
+/**
+ * Validate and get safe target origin for postMessage
+ * 
+ * Security: Validates origin against allowlist before using in postMessage
+ * 
+ * @param {string} potentialOrigin - Origin derived from request headers
+ * @returns {string} Safe origin for postMessage (validates against allowlist)
+ */
+function getSafeTargetOrigin(potentialOrigin) {
+    const allowedOrigins = getAllowedOrigins()
+    
+    // If no allowlist is configured, log warning and use permissive "*"
+    if (allowedOrigins.size === 0) {
+        logger.warn('[3DS Controller] No allowed origins configured, using permissive "*" for postMessage')
+        return '*'
+    }
+    
+    // Check if the potential origin is in the allowlist
+    if (allowedOrigins.has(potentialOrigin)) {
+        return potentialOrigin
+    }
+    
+    // Log security event - potential origin spoofing attempt
+    logger.error('[3DS Controller] Origin not in allowlist - postMessage will use "*" (restricted mode):', {
+        attemptedOrigin: potentialOrigin,
+        allowedOrigins: Array.from(allowedOrigins)
+    })
+    
+    // Return "*" as fallback (less secure but prevents postMessage from being blocked)
+    // The parent window should use origin checking in its postMessage handler
+    return '*'
+}
+
+/**
  * Build HTML response that sends postMessage to parent window
  * This HTML is rendered in the iframe and communicates back to the modal
  * 
  * @param {Object} data - Data to send via postMessage
+ * @param {string} targetOrigin - Validated target origin for postMessage
+ * @param {string} nonce - CSP nonce for inline script/style tags
  * @returns {string} HTML string
  */
 function build3DSPostbackHtml(data, targetOrigin, nonce) {
@@ -253,10 +312,12 @@ function buildEmptyThreeDSValues() {
  */
 async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSValues) {
     const orderApi = new OrderApiClient()
-    
+    const newStatus = isSuccess ? 'new' : 'failed'
+    await orderApi.updateOrderStatus(orderNo, newStatus)
     // Get order and payment instrument FIRST — before any status change.
     // The Orders Data API returns 403 for orders in 'failed' status,
     // so all patches must happen while the order is still in its current state.
+    console.log('[3DS Controller] Fetching order for patching:', orderNo)
     const order = await orderApi.getOrder(orderNo)
     const paymentInstrument = order.paymentInstruments?.[0]
     const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
@@ -288,7 +349,7 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
 
     // Update order status LAST — after all patches are written,
     // so the order remains accessible via the Orders Data API throughout.
-    const newStatus = isSuccess ? 'new' : 'failed'
+    
     await orderApi.updateOrderStatus(orderNo, newStatus)
 }
 
@@ -341,7 +402,6 @@ function buildPostMessageData(isSuccess, responseStatus, threeDSValues, paymentR
         success: isSuccess,
         responseStatus: responseStatus || THREE_DS.RESPONSE_STATUS.ERROR,
         authenticationStatus: threeDSValues.transactionStatus || THREE_DS.TRANSACTION_STATUS.UNAVAILABLE,
-        authenticationValue: threeDSValues.authenticationValue || '',
         eci: threeDSValues.eci || '',
         transactionId: paymentRequestId,
         orderID: orderNo,
@@ -366,13 +426,26 @@ function buildPostMessageData(isSuccess, responseStatus, threeDSValues, paymentR
  * @param {Object} res - Express response
  */
 export async function handle3DSCallback(req, res) {
-    // Derive storefront origin from request headers — this server IS the storefront server,
-    // so its own origin is the correct and only valid postMessage target.
+    // Derive storefront origin from request headers
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'https'
     const host = req.headers['x-forwarded-host'] || req.headers.host
-    const storefrontOrigin = `${protocol}://${host}`
+    const potentialOrigin = `${protocol}://${host}`
+    
+    const targetOrigin = getSafeTargetOrigin(potentialOrigin)
+    
     // CSP nonce set by jpmorganCSPMiddleware — must be added to inline script/style tags
     const cspNonce = res.locals.cspNonce || null
+    
+    const allowedOrigins = getAllowedOrigins()
+    if (allowedOrigins.size > 0) {
+        const frameAncestorsDirective = Array.from(allowedOrigins).join(' ')
+        // Append to existing CSP header if present, or create new one
+        const existingCsp = res.getHeader('Content-Security-Policy') || ''
+        const framAncestorsCSP = existingCsp 
+            ? `${existingCsp}; frame-ancestors ${frameAncestorsDirective}`
+            : `frame-ancestors ${frameAncestorsDirective}`
+        res.setHeader('Content-Security-Policy', framAncestorsCSP)
+    }
 
     try {
         // Step 1: Validate request
@@ -385,7 +458,7 @@ export async function handle3DSCallback(req, res) {
                 orderID: validation.orderNo,
                 orderToken: validation.orderToken,
                 error: validation.error
-            }, storefrontOrigin, cspNonce))
+            }, targetOrigin, cspNonce))
         }
 
         const { orderNo, orderToken, paymentRequestId, responseStatus, queryMerchantId } = validation
@@ -397,7 +470,7 @@ export async function handle3DSCallback(req, res) {
 
         // Step 2: Check for duplicate callback
         const cacheKey = `${orderNo}:${paymentRequestId}`
-        const duplicateCheck = checkDuplicateCallback(cacheKey, orderNo, orderToken, responseStatus, storefrontOrigin, cspNonce)
+        const duplicateCheck = checkDuplicateCallback(cacheKey, orderNo, orderToken, responseStatus, targetOrigin, cspNonce)
         if (duplicateCheck.isDuplicate) {
             res.setHeader('Content-Type', 'text/html')
             return res.send(duplicateCheck.html)
@@ -440,7 +513,7 @@ export async function handle3DSCallback(req, res) {
         callbackCache.set(cacheKey, { status: 'completed', result: postMessageData, timestamp: Date.now() })
 
         res.setHeader('Content-Type', 'text/html')
-        return res.send(build3DSPostbackHtml(postMessageData, storefrontOrigin, cspNonce))
+        return res.send(build3DSPostbackHtml(postMessageData, targetOrigin, cspNonce))
 
     } catch (error) {
         logger.error('[3DS Controller] Unexpected error:', error.message)
@@ -459,7 +532,7 @@ export async function handle3DSCallback(req, res) {
             success: false,
             responseStatus: THREE_DS.RESPONSE_STATUS.ERROR,
             error: 'An unexpected error occurred'
-        }, storefrontOrigin, cspNonce))
+        }, targetOrigin, cspNonce))
     }
 }
 

@@ -103,7 +103,7 @@ export const RETRY_CONFIG = {
  */
 export const MERCHANT_SOFTWARE = {
     companyName: 'JPMC Plugin',
-    productName: 'JPMC SFCC B2C Cartridge',
+    productName: 'JPMC SFCC PWA Cartridge',
     version: '1.0'
 }
 

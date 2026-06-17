@@ -8,6 +8,13 @@
 import logger from '../../../utils/logger'
 import { extractSlasToken } from '../../../utils/locale-extractor'
 import { GENERIC_API_ERROR_MESSAGE } from '../../../utils/constants/error-constants'
+import { validateOrderNumber } from '../../../utils/validation/input-validation'
+
+/**
+ * Allowed attributes for PATCH /api/jpmorgan/order/:orderNo/payment-instruments/:paymentInstrumentId
+ * Only attributes in the allowlist are included in the SFCC API request.
+ */
+const ALLOWED_PATCH_ATTRIBUTES = new Set(['c_jpmcTransactionId'])
 
 /**
  * Handle order confirmation after JPMC authorization
@@ -147,14 +154,14 @@ export const handleConfirmOrder = async (req, res) => {
 export const handlePatchOrderPaymentInstrument = async (req, res) => {
     try {
         const { orderNo, paymentInstrumentId } = req.params
-        const customAttributes = req.body
+        const requestBody = req.body
         
-        // Validate required parameters
-        if (!orderNo) {
+        const orderValidation = validateOrderNumber(orderNo)
+        if (!orderValidation.valid) {
             return res.status(400).json({
                 success: false,
-                errorCode: 'INVALID_REQUEST',
-                message: 'Missing required parameter: orderNo'
+                errorCode: orderValidation.code || 'INVALID_REQUEST',
+                message: orderValidation.error || 'Invalid order number'
             })
         }
         
@@ -166,7 +173,17 @@ export const handlePatchOrderPaymentInstrument = async (req, res) => {
             })
         }
         
-        if (!customAttributes || Object.keys(customAttributes).length === 0) {
+        const paymentInstrumentIdPattern = /^[A-Za-z0-9_-]{1,100}$/
+        if (!paymentInstrumentIdPattern.test(paymentInstrumentId)) {
+            logger.warn('[OrderPatching] Invalid paymentInstrumentId format:', paymentInstrumentId.substring(0, 20))
+            return res.status(400).json({
+                success: false,
+                errorCode: 'INVALID_REQUEST',
+                message: 'Invalid paymentInstrumentId format'
+            })
+        }
+        
+        if (!requestBody || Object.keys(requestBody).length === 0) {
             return res.status(400).json({
                 success: false,
                 errorCode: 'INVALID_REQUEST',
@@ -174,7 +191,33 @@ export const handlePatchOrderPaymentInstrument = async (req, res) => {
             })
         }
         
-        // Extract SLAS token from request headers
+        
+        const filteredAttributes = {}
+        const rejectedAttributes = []
+        
+        for (const [key, value] of Object.entries(requestBody)) {
+            if (ALLOWED_PATCH_ATTRIBUTES.has(key)) {
+                filteredAttributes[key] = value
+            } else {
+                rejectedAttributes.push(key)
+            }
+        }
+        
+        if (rejectedAttributes.length > 0) {
+            logger.warn('[OrderPatching] Request contains attributes not in allowlist (rejected):', {
+                rejectedAttributes,
+                allowedAttributes: Array.from(ALLOWED_PATCH_ATTRIBUTES)
+            })
+        }
+        
+        if (Object.keys(filteredAttributes).length === 0) {
+            return res.status(400).json({
+                success: false,
+                errorCode: 'INVALID_REQUEST',
+                message: 'Request body must contain at least one allowed attribute (c_jpmcTransactionId)'
+            })
+        }
+        
         const slasToken = extractSlasToken(req)
         if (!slasToken) {
             return res.status(401).json({
@@ -201,13 +244,14 @@ export const handlePatchOrderPaymentInstrument = async (req, res) => {
         
         const apiUrl = `https://${shortCode}.api.commercecloud.salesforce.com/checkout/shopper-orders/v1/organizations/${organizationId}/orders/${orderNo}/payment-instruments/${paymentInstrumentId}?siteId=${siteId}`
         
+        // Security: Send only filtered attributes to prevent unexpected data in the SFCC API
         const response = await fetch(apiUrl, {
             method: 'PATCH',
             headers: {
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${slasToken}`
             },
-            body: JSON.stringify(customAttributes)
+            body: JSON.stringify(filteredAttributes)
         })
         
         if (!response.ok) {
@@ -231,7 +275,8 @@ export const handlePatchOrderPaymentInstrument = async (req, res) => {
             success: true,
             orderNo,
             paymentInstrumentId,
-            patchedAttributes: Object.keys(customAttributes),
+            patchedAttributes: Object.keys(filteredAttributes),
+            rejectedAttributes: rejectedAttributes.length > 0 ? rejectedAttributes : undefined,
             response: result
         })
         

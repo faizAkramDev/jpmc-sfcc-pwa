@@ -403,7 +403,6 @@ describe('order-controller', () => {
                 req: {
                     params: { orderNo: 'ORDER123' },
                     body: {
-                        jpmcResponse: { errorCode: 'DECLINED' },
                         reason: 'Card declined',
                         errorCode: 'DECLINED'
                     }
@@ -473,8 +472,8 @@ describe('order-controller', () => {
                 req: {
                     params: { orderNo: 'ORDER123' },
                     body: {
-                        jpmcResponse: { errorCode: 'DECLINED' },
-                        reason: 'Card declined'
+                        reason: 'Card declined',
+                        errorCode: 'DECLINED'
                     }
                 }
             })
@@ -483,7 +482,6 @@ describe('order-controller', () => {
 
             expect(onAuthorizationFailure).toHaveBeenCalledWith(
                 'ORDER123',
-                { errorCode: 'DECLINED' },
                 'Card declined',
                 req
             )

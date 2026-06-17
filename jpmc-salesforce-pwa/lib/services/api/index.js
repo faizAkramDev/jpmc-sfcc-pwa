@@ -33,8 +33,6 @@ export {
     handleGetFraudConfig,
     handleAuthorize,
     handleVerify,
-    handleConfirmOrder,
-    handlePatchOrderPaymentInstrument,
     handleGetAvailablePaymentMethods
 } from './handlers'
 

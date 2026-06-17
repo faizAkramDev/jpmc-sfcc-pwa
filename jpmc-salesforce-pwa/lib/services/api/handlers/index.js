@@ -17,12 +17,6 @@ export {
     handleVerify 
 } from './payment-handlers'
 
-// Order handlers
-export { 
-    handleConfirmOrder, 
-    handlePatchOrderPaymentInstrument 
-} from './order-handlers'
-
 // Payment methods handler
 export { 
     handleGetAvailablePaymentMethods 

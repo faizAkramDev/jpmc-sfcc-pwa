@@ -22,8 +22,11 @@ import { PHONE_COUNTRY_CODES } from '../../../utils/constants.mjs'
  * 
  * @returns {object} merchantSoftware object for JPMC API
  */
-export const buildMerchantSoftware = () => {
-    return { ...MERCHANT_SOFTWARE }
+export const buildMerchantSoftware = (isPreventSoftwareId) => {
+    const orgId = process.env.SFCC_ORG_ID || process.env.COMMERCE_API_ORG_ID || ''
+    const realmMatch = orgId ? /^f_ecom_([^_]+)/.exec(orgId) : null
+    const softwareId = process.env.SFCC_REALM_ID || (realmMatch ? realmMatch[1] : '')
+    return { ...MERCHANT_SOFTWARE, ...(isPreventSoftwareId ? {} : { softwareId }) }
 }
 
 /**
@@ -33,9 +36,9 @@ export const buildMerchantSoftware = () => {
  * @param {object} config - JPMC config with merchant* properties
  * @returns {object} merchant object for JPMC API
  */
-export const buildMerchant = (config = {}) => {
+export const buildMerchant = (config = {}, isPreventSoftwareId = false) => {
     const merchant = {
-        merchantSoftware: buildMerchantSoftware()
+        merchantSoftware: buildMerchantSoftware(isPreventSoftwareId)
     }
     
     // Only include merchantCategoryCode if configured (4-digit string)

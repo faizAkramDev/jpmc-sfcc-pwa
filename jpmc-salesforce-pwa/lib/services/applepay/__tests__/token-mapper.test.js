@@ -261,7 +261,7 @@ describe('Apple Pay Token Mapper', () => {
             
             // Merchant software is hardcoded per JPMC requirements
             expect(payload.merchant.merchantSoftware.companyName).toBe('JPMC Plugin');
-            expect(payload.merchant.merchantSoftware.productName).toBe('JPMC SFCC B2C Cartridge');
+            expect(payload.merchant.merchantSoftware.productName).toBe('JPMC SFCC PWA Cartridge');
             expect(payload.merchant.merchantSoftware.version).toBe('1.0');
         });
 
@@ -276,7 +276,7 @@ describe('Apple Pay Token Mapper', () => {
             
             // Uses hardcoded constants from MERCHANT_SOFTWARE
             expect(payload.merchant.merchantSoftware.companyName).toBe('JPMC Plugin');
-            expect(payload.merchant.merchantSoftware.productName).toBe('JPMC SFCC B2C Cartridge');
+            expect(payload.merchant.merchantSoftware.productName).toBe('JPMC SFCC PWA Cartridge');
         });
 
         it('should include amount and currency', () => {
@@ -568,8 +568,7 @@ describe('Apple Pay Token Mapper', () => {
             
             expect(parsed.success).toBe(true);
             expect(parsed.transactionId).toBe('TXN123');
-            expect(parsed.cardType).toBe('VISA');
-            expect(parsed.lastFour).toBe('1234');
+            expect(parsed.cardTypeName).toBe('Visa');
         });
 
         it('should return failure for failed response', () => {
@@ -593,15 +592,18 @@ describe('Apple Pay Token Mapper', () => {
             expect(parsed.error.code).toBe('EMPTY_RESPONSE');
         });
 
-        it('should include raw response for debugging', () => {
+        it('should include transactionId and required fields', () => {
             const response = {
                 responseStatus: 'SUCCESS',
-                transactionState: 'AUTHORIZED'
+                transactionState: 'AUTHORIZED',
+                transactionId: 'TXN123',
+                amount: 9999
             };
             
             const parsed = parseJPMCApplePayResponse(response);
             
-            expect(parsed.raw).toBe(response);
+            expect(parsed.transactionId).toBe('TXN123');
+            expect(parsed.amount).toBe(9999);
         });
     });
 

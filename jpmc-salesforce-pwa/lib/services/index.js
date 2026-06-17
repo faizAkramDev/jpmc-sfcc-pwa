@@ -30,18 +30,15 @@ export {
     mergeWithEnvironmentConfig
 } from './sfcc'
 
-// API Routes (Server-Side)
+// API Configuration handlers 
 export {
-    registerJPMCRoutes,
     handleAuthorize,
     handleGetConfig,
     handleVerify,
     handleGetGooglePayConfig,
     handleGetFraudConfig,
-    handleConfirmOrder,
-    handlePatchOrderPaymentInstrument,
     handleGetAvailablePaymentMethods
-} from './api-routes'
+} from './api'
 
 // JP Morgan API (Server-Side)
 export {

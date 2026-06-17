@@ -16,20 +16,9 @@ import {
     DEFAULT_LAT_LONG,
     THREE_DS
 } from '../../utils/constants.mjs'
-import { MERCHANT_SOFTWARE } from '../../utils/constants/misc-constants'
 import logger from '../../utils/logger'
 import { is3DSEnabled, build3DSAuthenticationParameters } from './helpers/threeds-helpers'
-import { formatPhoneForJPMC } from './helpers/request-helpers'
-
-/**
- * Build merchantSoftware object
- * Uses hardcoded constants - not configurable via Business Manager
- * 
- * @returns {object} merchantSoftware object for JPMC API
- */
-const buildMerchantSoftware = () => {
-    return { ...MERCHANT_SOFTWARE }
-}
+import { buildMerchantSoftware, formatPhoneForJPMC } from './helpers/request-helpers'
 
 /**
  * Build complete merchant object from config
@@ -37,9 +26,9 @@ const buildMerchantSoftware = () => {
  * 
  * @param {object} _config - JPMC config with merchant* properties
  */
-const buildMerchant = (_config = {}) => {
+const buildMerchant = (_config = {}, isPreventSoftwareId = false) => {
     const merchant = {
-        merchantSoftware: buildMerchantSoftware()
+        merchantSoftware: buildMerchantSoftware(isPreventSoftwareId)
     }
     
     return merchant
@@ -449,7 +438,7 @@ export const buildVerificationRequestBody = (data, usePlainCard = false, config 
     const { card, accountHolder, billingAddress, currency } = data
     
     const body = {
-        merchant: buildMerchant(config),
+        merchant: buildMerchant(config, true),
         currency,
         paymentMethodType: {
             card: usePlainCard ? {

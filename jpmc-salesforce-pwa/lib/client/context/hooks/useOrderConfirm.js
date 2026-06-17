@@ -90,8 +90,8 @@ export function useOrderConfirm({ locale, getAccessToken } = {}) {
                 body: JSON.stringify({
                     jpmcResponse,
                     paymentInstrumentId,
-                    captureMethod,
-                    paymentAmount
+                    paymentAmount,
+                    captureMethod
                 })
             })
             
@@ -156,7 +156,6 @@ export function useOrderConfirm({ locale, getAccessToken } = {}) {
                 method: 'POST',
                 headers,
                 body: JSON.stringify({
-                    jpmcResponse,
                     reason,
                     errorCode
                 })

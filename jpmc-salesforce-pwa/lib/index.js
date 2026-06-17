@@ -58,16 +58,6 @@ export { default as useApplePay } from './hooks/useApplePay'
 export { useJPMCPlaceOrder } from './hooks/useJPMCPlaceOrder'
 export { useAvailablePaymentMethods, checkAvailablePaymentMethods } from './hooks/useAvailablePaymentMethods'
 
-// =============================================================================
-// SERVER-SIDE API ROUTES (for PWA Kit SSR)
-// =============================================================================
-// Register these in your ssr.js
-// Note: registerJPMCRoutes is exported from ./ssr module above
-export {
-    handleAuthorize,
-    handleGetConfig,
-    handlePatchOrderPaymentInstrument
-} from './services/api-routes'
 
 // =============================================================================
 // JPMC API SERVICE (Server-Side Only)
@@ -173,7 +163,6 @@ export {
 import { createJPMCHandler, registerJPMCEndpoints } from './ssr'
 import { JPMCCheckoutProvider, useJPMCCheckout } from './client'
 import useJPMorganPayment from './hooks/useJPMorganPayment'
-import { registerJPMCRoutes } from './services/api-routes'
 
 export default {
     // SSR (primary)
@@ -185,6 +174,5 @@ export default {
     useJPMCCheckout,
     
     // Low-level (advanced)
-    useJPMorganPayment,
-    registerJPMCRoutes
+    useJPMorganPayment
 }

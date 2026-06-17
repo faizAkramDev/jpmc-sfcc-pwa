@@ -18,7 +18,7 @@ import {
     handleVerify,
     handleGetAvailablePaymentMethods,
     handleGetFraudConfig
-} from '../services/api-routes'
+} from '../services/api'
 
 import logger from '../utils/logger.js'
 import { GENERIC_API_ERROR_MESSAGE } from '../utils/constants/error-constants'
