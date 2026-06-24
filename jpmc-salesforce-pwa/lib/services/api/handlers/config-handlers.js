@@ -312,9 +312,20 @@ export const handleGetGooglePayConfig = async (req, res) => {
             // AVS setting from BM - used for address verification with JPMC
             enableAVS: config.enableAVS === true || config.enableAVS === 'true',
             
-            // Billing address required for SFCC order creation
-            // SFCC Shopper Orders API requires a billing address
-            billingAddressRequired: true
+            apiVersion: 2,
+            apiVersionMinor: 0,
+            
+            billingAddressRequired: true,
+            billingAddressParameters: {
+                format: 'FULL',
+                phoneNumberRequired: false
+            },
+            
+            // Email field requirement (REQUIRED)
+            emailRequired: true,
+            
+            // Ready flag (REQUIRED)
+            isConfigured: true
         }
         
         return res.status(200).json(googlePayConfig)
