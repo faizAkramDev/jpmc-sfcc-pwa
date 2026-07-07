@@ -12,7 +12,6 @@ jest.mock('dotenv', () => ({
     config: jest.fn(() => ({ parsed: {} }))
 }))
 jest.mock('../routes', () => ({
-    registerJPMCRoutes: jest.fn(),
     registerJPMCEndpoints: jest.fn()
 }))
 jest.mock('../middleware/csp', () => ({
@@ -106,8 +105,12 @@ describe('SSR Index Module', () => {
         })
 
         it('creates a handler when called with runtime and options', async () => {
+            process.env.JPMC_PRIVATE_KEY_BASE64 = 'test-key'
+            process.env.JPMC_CERTIFICATE_BASE64 = 'test-cert'
+            jest.resetModules()
+            
             const { createJPMCHandler } = await import('../index')
-            const { registerJPMCRoutes } = await import('../routes')
+            const { registerJPMCEndpoints } = await import('../routes')
             const { jpmorganCSPMiddleware } = await import('../middleware/csp')
 
             const mockApp = {
@@ -132,8 +135,12 @@ describe('SSR Index Module', () => {
         })
 
         it('registers routes with custom apiBasePath', async () => {
+            process.env.JPMC_PRIVATE_KEY_BASE64 = 'test-key'
+            process.env.JPMC_CERTIFICATE_BASE64 = 'test-cert'
+            jest.resetModules()
+            
             const { createJPMCHandler } = await import('../index')
-            const { registerJPMCRoutes } = await import('../routes')
+            const { registerJPMCEndpoints } = await import('../routes')
 
             const mockApp = { use: jest.fn() }
             const mockRuntime = {
@@ -142,9 +149,7 @@ describe('SSR Index Module', () => {
 
             createJPMCHandler(mockRuntime, {}, null, { apiBasePath: '/custom/api' })
 
-            expect(registerJPMCRoutes).toHaveBeenCalledWith(mockApp, expect.objectContaining({
-                basePath: '/custom/api'
-            }))
+            expect(registerJPMCEndpoints).toHaveBeenCalledWith(mockApp, mockRuntime, expect.any(Object))
         })
     })
 
@@ -370,7 +375,6 @@ describe('SSR Index Module', () => {
         it('exports route registration functions', async () => {
             const ssrModule = await import('../index')
 
-            expect(ssrModule.registerJPMCRoutes).toBeDefined()
             expect(ssrModule.registerJPMCEndpoints).toBeDefined()
         })
 

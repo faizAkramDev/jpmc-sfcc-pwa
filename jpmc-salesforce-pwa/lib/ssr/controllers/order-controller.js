@@ -11,6 +11,7 @@ import { OrderApiClient } from '../api/order-api'
 import { mapJPMCResponseToAttributes, mapPaymentTransactionAttributes, mapFraudResponseToOrderAttributes } from '../api/attribute-mapping'
 import logger, { safeStringify } from '../../utils/logger.js'
 import { validateOrderNumber } from '../../utils/validation/input-validation'
+import { extractSlasToken } from '../../utils/locale-extractor.js'
 
 /**
  * Controller context - stores configuration
@@ -29,6 +30,60 @@ let controllerConfig = {
  */
 export function configureOrderController(config) {
     controllerConfig = { ...controllerConfig, ...config }
+}
+
+/**
+ * POST /api/jpmorgan/order/create
+ * Creates an SFCC order from a basket using the shopper's SLAS token.
+ * Returns only { orderNo, orderTotal, paymentInstruments } — full order response is not forwarded to the client.
+ */
+export async function handleCreateOrder(req, res, next) {
+    try {
+        const { basketId } = req.body
+        if (!basketId) {
+            return res.status(400).json({ success: false, error: 'basketId is required' })
+        }
+
+        const slasToken = extractSlasToken(req)
+        if (!slasToken) {
+            return res.status(401).json({ success: false, error: 'Authorization required' })
+        }
+
+        const shortCode = controllerConfig.commerceConfig?.shortCode || process.env.COMMERCE_API_SHORT_CODE
+        const orgId = controllerConfig.commerceConfig?.orgId || process.env.COMMERCE_API_ORG_ID
+        const siteId = controllerConfig.commerceConfig?.siteId || process.env.COMMERCE_API_SITE_ID
+
+        const url = `https://${shortCode}.api.commercecloud.salesforce.com/checkout/shopper-orders/v1/organizations/${orgId}/orders?siteId=${siteId}`
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${slasToken}`
+            },
+            body: JSON.stringify({ basketId })
+        })
+
+        if (!response.ok) {
+            const error = await response.text()
+            logger.error('[OrderController] Create order failed:', response.status, error)
+            throw new Error(`Create order failed: ${response.status}`)
+        }
+
+        const order = await response.json()
+
+        logger.info('[OrderController] Order created', { orderNo: order.orderNo })
+
+        res.locals.response = {
+            orderNo: order.orderNo,
+            orderTotal: order.orderTotal,
+            paymentInstruments: order.paymentInstruments
+        }
+        return next()
+    } catch (error) {
+        logger.error('[OrderController] Create order error:', error)
+        return next(error)
+    }
 }
 
 // =============================================================================

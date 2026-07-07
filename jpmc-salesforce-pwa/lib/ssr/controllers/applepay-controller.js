@@ -22,6 +22,7 @@ import logger from '../../utils/logger.js'
 import { extractLocale, extractSlasToken } from '../../utils/locale-extractor.js'
 import { GENERIC_API_ERROR_MESSAGE } from '../../utils/constants/error-constants'
 import { isDefaultLocale } from '../../utils/site-config.js'
+import { toMinorUnits } from '../../utils/currency.js'
 
 // =============================================================================
 // Request Helpers (Multi-Locale Support)
@@ -422,7 +423,7 @@ export const handleApplePayAuthorize = async (req, res, next) => {
 
         // Build JP Morgan payment payload
         const jpmcPayload = buildJPMorganApplePayPayload({
-            applePayToken, amount: Math.round(Number.parseFloat(amount) * 100), currency,
+            applePayToken, amount: toMinorUnits(amount, currency), currency,
             merchantOrderNumber, billingContact, shippingContact,
             latLong: APPLE_PAY_DEFAULTS.latLong, captureMethod,
             merchant: {

@@ -105,7 +105,8 @@ export function useJPMCPlaceOrder({ createOrderFn, onSuccess, onError, baseUrl }
         registerThreeDSCallbacks,
         failOrderWithReopenBasket,
         commerceConfig,
-        refetchBasket
+        refetchBasket,
+        getAccessToken
     } = useJPMCCheckout()
 
     const [isLoading, setIsLoading] = useState(false)
@@ -147,15 +148,43 @@ export function useJPMCPlaceOrder({ createOrderFn, onSuccess, onError, baseUrl }
         }
         
         try {
-            await fetch('/api/jpmorgan/3ds/fail', {
+            // Attempt server-side basket reopening by sending commerceConfig and auth token
+            const headers = { 'Content-Type': 'application/json' }
+            let token = null
+            
+            if (getAccessToken) {
+                try {
+                    token = await getAccessToken()
+                    if (token) {
+                        headers['Authorization'] = `Bearer ${token}`
+                    }
+                } catch (err) {
+                    // Token fetch failed, proceed without it
+                }
+            }
+
+            const response = await fetch('/api/jpmorgan/3ds/fail', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ orderNo, orderToken, failureReason })
+                headers,
+                body: JSON.stringify({ 
+                    orderNo, 
+                    orderToken, 
+                    failureReason,
+                    commerceConfig: commerceConfig || undefined
+                })
             })
+
+            const result = await response.json()
+            
+            // Store basket reopen result if successful
+            if (result.basketReopened) {
+                lastBasketReopenResultRef.current = result
+                await refetchBasket?.()
+            }
         } catch (err) {
-            // Non-blocking
+            // Non-blocking - server endpoint failure is not critical
         }
-    }, [failOrderWithReopenBasket, commerceConfig, refetchBasket])
+    }, [failOrderWithReopenBasket, commerceConfig, refetchBasket, getAccessToken])
     
     useEffect(() => {
         registerThreeDSCallbacks({

@@ -1053,7 +1053,12 @@ describe('useJPMCPlaceOrder - 3DS callbacks', () => {
                 body: JSON.stringify({
                     orderNo: 'ORD-FAIL',
                     orderToken: 'token',
-                    failureReason: 'failure_reason'
+                    failureReason: 'failure_reason',
+                    commerceConfig: {
+                        proxy: '/api',
+                        organizationId: 'org123',
+                        siteId: 'site1'
+                    }
                 })
             })
         })

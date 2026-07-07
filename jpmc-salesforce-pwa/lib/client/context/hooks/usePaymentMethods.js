@@ -90,16 +90,17 @@ const getDefaultLocale = () => {
  * Apple Pay does NOT support multi-locale configuration
  * Normalizes locale formats (en-US vs en_US)
  * @param {string} locale - Locale to check (e.g., 'en-CA', 'en_CA')
+ * @param {string} defaultLocale - Default locale passed from consumer (e.g., 'en-US')
  * @returns {boolean} True if locale is the default locale
  */
-const isDefaultLocale = (locale) => {
+const isDefaultLocale = (locale, defaultLocale) => {
     if (!locale) return true // If no locale specified, assume default
     
-    const defaultLocale = getDefaultLocale()
+    const defaultLoc = getDefaultLocale(defaultLocale)
     
     // Normalize both locales (replace _ with -)
     const normalizedLocale = locale.replace(/_/g, '-')
-    const normalizedDefault = defaultLocale.replace(/_/g, '-')
+    const normalizedDefault = defaultLoc.replace(/_/g, '-')
     
     return normalizedLocale === normalizedDefault
 }
@@ -113,6 +114,7 @@ const isDefaultLocale = (locale) => {
  * @param {boolean} options.isGooglePayReady - Google Pay SDK ready state
  * @param {boolean} options.isGooglePayAvailable - Google Pay browser availability
  * @param {string} options.locale - Locale ID for multi-MID support (e.g., 'en_CA')
+ * @param {string} options.defaultLocale - Default locale (e.g., 'en-US') — optional, defaults to 'en-US'
  * @returns {object} Payment methods state and derived values
  */
 export function usePaymentMethods({
@@ -121,7 +123,8 @@ export function usePaymentMethods({
     isGooglePayReady = false,
     isGooglePayAvailable = false,
     isApplePayAvailable = false,
-    locale
+    locale,
+    defaultLocale = 'en-US'
 }) {
     // ==========================================================================
     // State
@@ -228,14 +231,14 @@ export function usePaymentMethods({
     const isApplePayEnabled = useMemo(() => {
         // Apple Pay is ONLY supported for the default locale (no multi-locale support)
         // Check locale first before any other checks
-        if (!isDefaultLocale(locale)) {
+        if (!isDefaultLocale(locale, defaultLocale)) {
             return false
         }
         
         const bmEnabled = activePaymentMethods?.isLoading || 
                activePaymentMethods?.isApplePayActive !== false
         return isApplePayAvailable && bmEnabled
-    }, [locale, isApplePayAvailable, activePaymentMethods?.isLoading, activePaymentMethods?.isApplePayActive])
+    }, [locale, defaultLocale, isApplePayAvailable, activePaymentMethods?.isLoading, activePaymentMethods?.isApplePayActive])
     
     // ==========================================================================
     // Return

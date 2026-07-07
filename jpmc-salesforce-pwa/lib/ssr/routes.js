@@ -4,9 +4,11 @@
  * Auto-registers all JP Morgan payment API endpoints.
  * These routes handle server-side payment processing.
  * 
- * This module provides two registration functions:
- * 1. registerJPMCRoutes - Legacy function for basic route registration
- * 2. registerJPMCEndpoints - New Adyen-style function with configurable overrides
+ * This module provides a single registration function:
+ * - registerJPMCEndpoints - Adyen-style function with configurable overrides
+ * 
+ * Legacy registerJPMCRoutes has been consolidated into registerJPMCEndpoints.
+ * Use registerJPMCEndpoints(app, runtime, config) for all new integrations.
  * 
  * @module @jpmorgan/jpmorgan-salesforce-pwa/ssr/routes
  */
@@ -26,6 +28,7 @@ import { GENERIC_API_ERROR_MESSAGE } from '../utils/constants/error-constants'
 import {
     configureOrderController,
     handleConfirmOrder,
+    handleCreateOrder,
     handleFailOrder,
     handleUpdateOrderStatus,
     handlePatchPaymentInstrument,
@@ -77,125 +80,6 @@ export function ErrorHandler(err, req, res, _next) {
  * 
  * @param {object} app - Express app instance
  * @param {object} options - Route options
- * @param {string} options.basePath - Base path for all routes (default: /api/jpmorgan)
- * @param {boolean} options.debug - Enable debug logging
- * @param {boolean} options.enableRateLimit - Enable rate limiting (default: true)
- * @param {object} options.rateLimitOptions - Rate limit configuration
- * @param {number} options.rateLimitOptions.windowMs - Time window in ms (default: 60000)
- * @param {number} options.rateLimitOptions.max - Max requests per window (default: 5)
- */
-export function registerJPMCRoutes(app, options = {}) {
-    const {
-        basePath = '/api/jpmorgan',
-        debug = false,
-        enableRateLimit = true,
-        rateLimitOptions = { windowMs: 60000, max: 5 }
-    } = options
-    
-    // Apply rate limiting to payment endpoints (5 req/60s by default)
-    if (enableRateLimit) {
-        applyRateLimiting(app, basePath, rateLimitOptions)
-        if (debug) {
-            logger.info('[JPMC Routes] Rate limiting enabled:', rateLimitOptions)
-        }
-    }
-    
-    if (debug) {
-        logger.info(`[JPMC Routes] Registering routes at ${basePath}`)
-    }
-    
-    // ==========================================================================
-    // Configuration Endpoint
-    // ==========================================================================
-    
-    /**
-     * GET/POST /api/jpmorgan/config
-     * Returns client-safe configuration (merchantId, PIE URLs, environment)
-     */
-    app.get(`${basePath}/config`, handleGetConfig)
-    app.post(`${basePath}/config`, handleGetConfig)
-    
-    // ==========================================================================
-    // Google Pay Configuration Endpoint
-    // ==========================================================================
-    
-    /**
-     * GET/POST /api/jpmorgan/googlepay/config
-     * Returns Google Pay specific configuration:
-     * - Gateway merchant ID
-     * - Supported networks and auth methods
-     * - Environment (TEST/PRODUCTION)
-     */
-    app.get(`${basePath}/googlepay/config`, handleGetGooglePayConfig)
-    app.post(`${basePath}/googlepay/config`, handleGetGooglePayConfig)
-    
-    // ==========================================================================
-    // Available Payment Methods Endpoint
-    // ==========================================================================
-    
-    /**
-     * GET /api/jpmorgan/available-payment-methods
-     * Returns which payment types are enabled in BM:
-     * - isCreditCardActive: boolean
-     * - isGooglePayActive: boolean
-     * - isApplePayActive: boolean
-     * 
-     * This is auto-fetched by JPMCCheckoutProvider - no developer action needed.
-     */
-    app.get(`${basePath}/available-payment-methods`, handleGetAvailablePaymentMethods)
-
-    // ==========================================================================
-    // Fraud Check Configuration Endpoint
-    // ==========================================================================
-
-    /**
-     * GET /api/jpmorgan/fraud-config
-     * Returns client-safe fraud/Kount configuration:
-     * - enableFraudCheck, enableFraudCheckAtAuth, kountClientId, kountEnvironment
-     * Used by JPMCCheckoutProvider to initialize Kount SDK.
-     */
-    app.get(`${basePath}/fraud-config`, handleGetFraudConfig)
-    
-    // ==========================================================================
-    // Payment Endpoints
-    // ==========================================================================
-    
-    /**
-     * POST /api/jpmorgan/authorize
-     * Create payment authorization (called AFTER order creation)
-     * 
-     * Body: { amount, currency, card, captureMethod, merchantOrderNumber, billingAddress }
-     * 
-     * Note: merchantOrderNumber should be the SFCC orderNo from the order-first flow.
-     */
-    app.post(`${basePath}/authorize`, handleAuthorize)
-    
-    // ==========================================================================
-    // Verification Endpoint
-    // ==========================================================================
-    
-    /**
-     * POST /api/jpmorgan/verify
-     * Verify card and get encrypted payment token reference
-     * 
-     * Body: { card, accountHolder, billingAddress, currency }
-     * Returns: { success, tokenRef, fraudRuleAction }
-     */
-    app.post(`${basePath}/verify`, handleVerify)
-    
-    if (debug) {
-        logger.info('[JPMC Routes] Verification endpoint enabled')
-    }
-    
-    if (debug) {
-        logger.info('[JPMC Routes] All routes registered successfully')
-    }
-}
-
-// =============================================================================
-// Adyen-style Endpoint Registration
-// =============================================================================
-
 /**
  * Register JPMC endpoints with configurable handlers (Adyen-style)
  * 
@@ -211,48 +95,6 @@ export function registerJPMCRoutes(app, options = {}) {
  * @param {function} config.onAuthorizationFailure - Custom handler after failed payment
  * @param {object} config.overrides - Override default handlers
  * @param {boolean} config.debug - Enable debug logging
- * 
- * @example
- * ```javascript
- * // In ssr.js - Minimal setup (plug-and-play)
- * import { registerJPMCEndpoints } from '@jpmorgan/jpmorgan-salesforce-pwa/ssr'
- * 
- * const { handler } = runtime.createHandler(options, (app) => {
- *     app.use(bodyParser.json())
- *     
- *     // One line to register all JPMC endpoints
- *     registerJPMCEndpoints(app, runtime)
- *     
- *     app.get('*', runtime.render)
- * })
- * ```
- * 
- * @example
- * ```javascript
- * // With custom attribute mapping
- * registerJPMCEndpoints(app, runtime, {
- *     attributeMapping: {
- *         c_myCustomField: (response) => response.transactionId,
- *         c_paymentProvider: () => 'JPMC',
- *         c_processedAt: () => new Date().toISOString()
- *     },
- *     onAuthorizationSuccess: async (orderNo, jpmcResponse) => {
- *         // Custom logic after successful payment
- *         console.log('Payment successful for order:', orderNo)
- *     }
- * })
- * ```
- * 
- * @example
- * ```javascript
- * // With handler overrides
- * registerJPMCEndpoints(app, runtime, {
- *     overrides: {
- *         authorize: [MyCustomAuthMiddleware, handleAuthorize, SuccessHandler],
- *         confirmOrder: [MyAuthCheck, handleConfirmOrder, MySuccessHandler]
- *     }
- * })
- * ```
  */
 export function registerJPMCEndpoints(app, runtime, config = {}) {
     const {
@@ -324,6 +166,7 @@ export function registerJPMCEndpoints(app, runtime, config = {}) {
         authorize: [handleAuthorize],
         verify: [handleVerify],
         confirmOrder: [handleConfirmOrder, SuccessHandler],
+        createOrder: [handleCreateOrder, SuccessHandler],
         failOrder: [handleFailOrder, SuccessHandler],
         updateOrderStatus: [handleUpdateOrderStatus, SuccessHandler],
         patchPaymentInstrument: [handlePatchPaymentInstrument, SuccessHandler],
@@ -373,7 +216,14 @@ export function registerJPMCEndpoints(app, runtime, config = {}) {
     // ==========================================================================
     // Order Management Endpoints (Server-side)
     // ==========================================================================
-    
+
+    /**
+     * POST /api/jpmorgan/order/create
+     * Creates an SFCC order server-side from a basket.
+     * Used by PIE, Google Pay, and Apple Pay flows for locale-aware order creation.
+     */
+    app.post(`${basePath}/order/create`, ...handlers.createOrder)
+
     /**
      * POST /api/jpmorgan/order/:orderNo/confirm
      * Confirm order after successful payment
@@ -461,4 +311,4 @@ export function registerJPMCEndpoints(app, runtime, config = {}) {
 export { configureApplePayController } from './controllers/applepay-controller'
 export { configureThreeDSController } from './controllers/threeds-controller'
 
-export default { registerJPMCRoutes, registerJPMCEndpoints, SuccessHandler, ErrorHandler, configureApplePayController, configureThreeDSController }
+export default { registerJPMCEndpoints, SuccessHandler, ErrorHandler, configureApplePayController, configureThreeDSController }

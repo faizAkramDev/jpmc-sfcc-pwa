@@ -224,7 +224,7 @@ const buildVerificationPayload = ({ card, accountHolder, billingAddress, currenc
 
     return {
         merchant: {
-            merchantSoftware: buildMerchantSoftware(true)
+            merchantSoftware: buildMerchantSoftware()
         },
         currency,
         paymentMethodType: {
@@ -538,11 +538,11 @@ export const handleAuthorize = async (req, res) => {
     try {
         const config = await getServerConfigAsync(req)
         
-        logger.info('[JPMC Authorize] ========== INCOMING REQUEST ==========')
-        logger.info('[JPMC Authorize] Request body:', safeStringify(req.body))
-        logger.info('[JPMC Authorize] browserInfo received:', !!req.body.browserInfo)
-        logger.info('[JPMC Authorize] 3DS config - jpmc3DSEnabled:', config.jpmc3DSEnabled)
-        logger.info('[JPMC Authorize] ===========================================')
+        logger.debug('[JPMC Authorize] ========== INCOMING REQUEST ==========')
+        logger.debug('[JPMC Authorize] Request body:', safeStringify(req.body))
+        logger.debug('[JPMC Authorize] browserInfo received:', !!req.body.browserInfo)
+        logger.debug('[JPMC Authorize] 3DS config - jpmc3DSEnabled:', config.jpmc3DSEnabled)
+        logger.debug('[JPMC Authorize] ===========================================' )
         
         if (!config.merchantId) {
             return res.status(500).json({ success: false, errorCode: 'CONFIGURATION_ERROR', message: GENERIC_API_ERROR_MESSAGE })
@@ -696,7 +696,7 @@ export const handleVerify = async (req, res) => {
         }
 
         const { card, accountHolder, billingAddress, currency, amount, fraudShoppingCart, shipTo, kountSessionId } = req.body
-        logger.info('[JPMC Verify] Incoming verification request:', safeStringify(req.body))
+        logger.debug('[JPMC Verify] Incoming verification request:', safeStringify(req.body))
         
         if (!card) {
             return res.status(400).json({

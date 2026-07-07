@@ -35,6 +35,7 @@ import { GooglePayButtonPropTypes } from './utils/googlepay-button-proptypes'
 import { useVariantValidation } from './hooks/useVariantValidation'
 import { useServerConfig } from './hooks/useServerConfig'
 import { buildDisplayItemsFromBasket } from '../utils/display-items'
+import { currencyDecimals } from '../../utils/currency'
 
 // =============================================================================
 // Utility Functions
@@ -46,33 +47,48 @@ import { buildDisplayItemsFromBasket } from '../utils/display-items'
  * Uses shared buildDisplayItemsFromBasket when basket is available (includes discounts).
  * Falls back to manual construction when only individual values are provided.
  * 
+ * Always uses English labels. For localized labels, use the label-fetcher utility
+ * at the consuming application level with react-intl.
+ * 
  * @param {Object} options - Options for building display items
  * @param {string|number} [options.subtotal] - Product subtotal (fallback when no basket)
  * @param {Object} [options.basket] - Basket object (preferred - uses shared utility)
+ * @param {string} [options.currency] - ISO 4217 currency code (required for proper decimal formatting)
  * @returns {Array} Array of display item objects for Google Pay
  */
-const buildDisplayItems = ({ subtotal, basket } = {}) => {
+const buildDisplayItems = ({ subtotal, basket, currency, labels } = {}) => {
     // Use shared utility when basket is available (includes discounts, status handling)
+    // Optional labels parameter for localization
     if (basket) {
-        return buildDisplayItemsFromBasket(basket)
+        return buildDisplayItemsFromBasket(basket, currency || basket.currency, labels)
     }
     
-    // Fallback for checkout without basket (just amount)
+    // Fallback for checkout without basket (just amount) - use labels if provided
+    const decimals = currencyDecimals(currency)
+    const subtotalStr = Number(subtotal ?? 0).toFixed(decimals)
+    const zeroStr = Number(0).toFixed(decimals)
+    
+    const {
+        subtotal: subtotalLabel = 'Subtotal',
+        shipping: shippingLabel = 'Shipping',
+        tax: taxLabel = 'Tax'
+    } = labels || {}
+    
     return [
         {
-            label: 'Subtotal',
+            label: subtotalLabel,
             type: 'SUBTOTAL',
-            price: String(subtotal ?? '0.00')
+            price: subtotalStr
         },
         {
-            label: 'Shipping',
+            label: shippingLabel,
             type: 'LINE_ITEM',
-            price: '0.00'
+            price: zeroStr
         },
         {
-            label: 'Tax',
+            label: taxLabel,
             type: 'TAX',
-            price: '0.00'
+            price: zeroStr
         }
     ]
 }
@@ -147,11 +163,20 @@ const buildValidationProps = ({ isCartContext, isPDPContext, basket, createOrder
  * Execute click handler logic for a specific context
  * @private
  */
-const executeContextClick = ({ isPDPContext, isCartContext, isDirectCallbackFlow, variantValidationRef, product, basket, loadPaymentData, getPaymentToken, paymentDetailsRef, amount, currencyCode, onError, onSuccess }) => {
+const executeContextClick = ({ isPDPContext, isCartContext, isDirectCallbackFlow, variantValidationRef, product, basket, loadPaymentData, getPaymentToken, paymentDetailsRef, amount, currencyCode, onError, onSuccess, displayItemLabels }) => {
     // Direct callback flow (new pattern matching Apple Pay)
     if (isDirectCallbackFlow) {
         const directAmount = amount || paymentDetailsRef?.current?.amount
-        const directCurrency = currencyCode || paymentDetailsRef?.current?.currencyCode || 'USD'
+        const directCurrency = currencyCode || paymentDetailsRef?.current?.currencyCode
+        
+        if (!directCurrency) {
+            const error = {
+                code: GOOGLE_PAY_ERROR_CODES.CONFIGURATION_ERROR,
+                message: 'Currency is required for direct callback flow. Pass currencyCode prop or set paymentDetailsRef.currencyCode.'
+            }
+            onError?.(error)
+            return
+        }
         
         const currencyError = validateCurrency(directCurrency, 'Payment')
         if (currencyError) {
@@ -162,7 +187,7 @@ const executeContextClick = ({ isPDPContext, isCartContext, isDirectCallbackFlow
         loadPaymentData({
             amount: String(directAmount),
             currencyCode: directCurrency,
-            displayItems: buildDisplayItems({ subtotal: directAmount }),
+            displayItems: buildDisplayItems({ subtotal: directAmount, currency: directCurrency, labels: displayItemLabels }),
             shippingAddressRequired: true,
             callbackIntents: ['SHIPPING_ADDRESS', 'SHIPPING_OPTION', 'PAYMENT_AUTHORIZATION']
         })
@@ -208,14 +233,14 @@ const validateCurrency = (currency, contextName) => {
  * Build PDP payment data for loadPaymentData
  * @private
  */
-const buildPDPPaymentParams = (product, basket) => {
+const buildPDPPaymentParams = (product, basket, displayItemLabels = {}) => {
     const pdpAmount = (product?.price ?? 0).toString()
     const pdpCurrency = product?.currency || basket?.currency
     
     return {
         amount: pdpAmount,
         currencyCode: pdpCurrency,
-        displayItems: buildDisplayItems({ subtotal: pdpAmount }),
+        displayItems: buildDisplayItems({ subtotal: pdpAmount, currency: pdpCurrency, labels: displayItemLabels }),
         shippingAddressRequired: true,
         callbackIntents: ['SHIPPING_ADDRESS', 'SHIPPING_OPTION', 'PAYMENT_AUTHORIZATION']
     }
@@ -225,15 +250,17 @@ const buildPDPPaymentParams = (product, basket) => {
  * Build cart payment data for loadPaymentData
  * @private
  */
-const buildCartPaymentParams = (basket) => {
+const buildCartPaymentParams = (basket, displayItemLabels = {}) => {
     const cartAmount = basket?.orderTotal?.toString() || '0'
-    // Default to USD if basket currency is missing to prevent Google Pay errors
-    const cartCurrency = basket?.currency || 'USD'
+    const cartCurrency = basket?.currency
+    if (!cartCurrency) {
+        throw new Error('Basket currency is not available. Cannot initialize Google Pay without a valid currency.')
+    }
     
     return {
         amount: cartAmount,
         currencyCode: cartCurrency,
-        displayItems: buildDisplayItems({ basket }),
+        displayItems: buildDisplayItems({ basket, currency: cartCurrency, labels: displayItemLabels }),
         shippingAddressRequired: true,
         callbackIntents: ['SHIPPING_ADDRESS', 'SHIPPING_OPTION', 'PAYMENT_AUTHORIZATION']
     }
@@ -277,8 +304,8 @@ const checkVariantSelection = (variantValidationRef) => {
  * Handle PDP context click - validate currency and load payment data
  * @private
  */
-const handlePDPClick = ({ product, basket, loadPaymentData, onError }) => {
-    const params = buildPDPPaymentParams(product, basket)
+const handlePDPClick = ({ product, basket, loadPaymentData, onError, displayItemLabels }) => {
+    const params = buildPDPPaymentParams(product, basket, displayItemLabels)
     const currencyError = validateCurrency(params.currencyCode, 'Product')
     if (currencyError) {
         onError?.(currencyError)
@@ -291,8 +318,8 @@ const handlePDPClick = ({ product, basket, loadPaymentData, onError }) => {
  * Handle cart context click - validate currency and load payment data
  * @private
  */
-const handleCartClick = ({ basket, loadPaymentData, onError }) => {
-    const params = buildCartPaymentParams(basket)
+const handleCartClick = ({ basket, loadPaymentData, onError, displayItemLabels }) => {
+    const params = buildCartPaymentParams(basket, displayItemLabels)
     const currencyError = validateCurrency(params.currencyCode, 'Basket')
     if (currencyError) {
         onError?.(currencyError)
@@ -305,11 +332,11 @@ const handleCartClick = ({ basket, loadPaymentData, onError }) => {
  * Handle checkout context click - get payment token
  * @private
  */
-const handleCheckoutClick = ({ paymentDetailsRef, basket, getPaymentToken, onSuccess }) => {
+const handleCheckoutClick = ({ paymentDetailsRef, basket, getPaymentToken, onSuccess, displayItemLabels }) => {
     const { amount: currentAmount, currencyCode: currentCurrency } = paymentDetailsRef.current
     const checkoutDisplayItems = basket 
-        ? buildDisplayItems({ basket })
-        : buildDisplayItems({ subtotal: currentAmount })
+        ? buildDisplayItems({ basket, currency: currentCurrency, labels: displayItemLabels })
+        : buildDisplayItems({ subtotal: currentAmount, currency: currentCurrency, labels: displayItemLabels })
 
     getPaymentToken({
         amount: currentAmount,
@@ -518,7 +545,10 @@ const GooglePayButton = ({
     unavailableComponent,
     
     // === ACCESSIBILITY ===
-    ariaLabel = 'Pay with Google Pay'
+    ariaLabel = 'Pay with Google Pay',
+    
+    // === LOCALIZATION ===
+    displayItemLabels = {}
 }) => {
     // =========================================================================
     // Refs and State
@@ -733,7 +763,7 @@ const GooglePayButton = ({
         executeContextClick({
             isPDPContext, isCartContext, isDirectCallbackFlow, variantValidationRef,
             product, basket, loadPaymentData, getPaymentToken,
-            paymentDetailsRef, amount, currencyCode, onError, onSuccess
+            paymentDetailsRef, amount, currencyCode, onError, onSuccess, displayItemLabels
         })
     }, [
         disabled,
@@ -752,7 +782,8 @@ const GooglePayButton = ({
         onClick,
         onClickOverride,
         onSuccess,
-        onError
+        onError,
+        displayItemLabels
     ])
 
     // =========================================================================

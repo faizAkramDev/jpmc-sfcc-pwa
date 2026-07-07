@@ -8,9 +8,11 @@ import {
     DEFAULT_ATTRIBUTE_MAPPING,
     PAYMENT_TRANSACTION_ATTRIBUTE_MAPPING,
     AUTH_ORDER_ATTRIBUTE_MAPPING,
+    FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING,
     mapJPMCResponseToAttributes,
     mapPaymentTransactionAttributes,
     mapAuthResponseToOrderAttributes,
+    mapFraudResponseToOrderAttributes,
     createAttributeMapper,
     validateAttributeMapping
 } from '../attribute-mapping'
@@ -623,6 +625,155 @@ describe('attribute-mapping', () => {
             // Should not have the attribute since JSON.stringify will fail
             expect(attributes.c_jpmcCardNetworkResponse).toBeUndefined()
             expect(logger.warn).toHaveBeenCalled()
+        })
+    })
+})
+
+// Append fraud tests in a separate describe block
+describe('attribute-mapping - fraud mappings', () => {
+    beforeEach(() => {
+        jest.clearAllMocks()
+    })
+
+    describe('mapFraudResponseToOrderAttributes', () => {
+        it('maps fraud response to order attributes', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123',
+                riskElement: {
+                    score: 95,
+                    rules: ['rule1', 'rule2']
+                },
+                riskDecision: {
+                    fraudRuleAction: 'R'
+                }
+            }
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse)
+
+            expect(attributes.c_jpmcFraudTransactionId).toBe('fraud_txn_123')
+            expect(attributes.c_jpmcFraudRiskElement).toBeDefined()
+            expect(JSON.parse(attributes.c_jpmcFraudRiskElement)).toEqual({
+                score: 95,
+                rules: ['rule1', 'rule2']
+            })
+            expect(attributes.c_jpmcFraudRiskDecision).toBeDefined()
+            expect(JSON.parse(attributes.c_jpmcFraudRiskDecision)).toEqual({
+                fraudRuleAction: 'R'
+            })
+            expect(attributes.c_jpmcFraudCheckDate).toBeDefined()
+            expect(typeof attributes.c_jpmcFraudCheckDate).toBe('string')
+        })
+
+        it('returns empty object for null fraud response', () => {
+            const attributes = mapFraudResponseToOrderAttributes(null)
+
+            expect(attributes).toEqual({})
+            expect(logger.warn).toHaveBeenCalledWith('[AttributeMapping] No fraud response to map')
+        })
+
+        it('includes Kount session ID when provided', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123'
+            }
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse, 'kount_session_456')
+
+            expect(attributes.c_kountSessionId).toBe('kount_session_456')
+        })
+
+        it('handles riskElement with null value', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123',
+                riskElement: null,
+                riskDecision: {
+                    fraudRuleAction: 'A'
+                }
+            }
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse)
+
+            expect(attributes.c_jpmcFraudRiskElement).toBeUndefined()
+            expect(attributes.c_jpmcFraudRiskDecision).toBeDefined()
+        })
+
+        it('supports custom mapping for fraud response', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123'
+            }
+            const customMapping = {
+                c_customFraudField: (response) => response.transactionId + '_custom'
+            }
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse, null, customMapping)
+
+            expect(attributes.c_customFraudField).toBe('fraud_txn_123_custom')
+        })
+
+        it('merges custom mapping with default fraud mapping', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123',
+                riskDecision: {
+                    fraudRuleAction: 'R'
+                }
+            }
+            const customMapping = {
+                c_myCustomField: () => 'myValue'
+            }
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse, null, customMapping)
+
+            expect(attributes.c_jpmcFraudTransactionId).toBe('fraud_txn_123')
+            expect(attributes.c_myCustomField).toBe('myValue')
+        })
+    })
+
+    describe('FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING', () => {
+        it('includes c_jpmcFraudRiskElement as function', () => {
+            expect(FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING).toHaveProperty('c_jpmcFraudRiskElement')
+            expect(typeof FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskElement).toBe('function')
+        })
+
+        it('c_jpmcFraudRiskElement serializes riskElement to JSON', () => {
+            const mapper = FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskElement
+            const riskElement = { score: 90, rules: ['rule1'] }
+
+            const result = mapper({ riskElement })
+
+            expect(result).toBe(JSON.stringify(riskElement))
+        })
+
+        it('c_jpmcFraudRiskElement handles null riskElement', () => {
+            const mapper = FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskElement
+
+            const result = mapper({ riskElement: null })
+
+            expect(result).toBeNull()
+        })
+
+        it('c_jpmcFraudRiskDecision serializes riskDecision to JSON', () => {
+            const mapper = FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskDecision
+            const riskDecision = { fraudRuleAction: 'R' }
+
+            const result = mapper({ riskDecision })
+
+            expect(result).toBe(JSON.stringify(riskDecision))
+        })
+
+        it('c_jpmcFraudRiskDecision handles null riskDecision', () => {
+            const mapper = FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskDecision
+
+            const result = mapper({ riskDecision: null })
+
+            expect(result).toBeNull()
+        })
+
+        it('c_jpmcFraudCheckDate returns ISO date string', () => {
+            const mapper = FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudCheckDate
+
+            const result = mapper({})
+
+            expect(typeof result).toBe('string')
+            expect(new Date(result).getTime()).not.toBeNaN()
         })
     })
 })

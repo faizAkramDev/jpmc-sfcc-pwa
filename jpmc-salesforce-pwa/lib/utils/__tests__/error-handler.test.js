@@ -303,4 +303,122 @@ describe('Error Handler Utilities', () => {
             expect(result.message).toBe("Payment couldn't be processed. Please try again later.")
         })
     })
+
+    describe('retryWithBackoff', () => {
+        it('should return result on first successful attempt', async () => {
+            const fn = jest.fn().mockResolvedValue('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 3, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(1)
+        })
+
+        it('should retry on failure and succeed on second attempt', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('First attempt failed'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 3, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(2)
+        })
+
+        it('should retry multiple times until success', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('Fail 1'))
+                .mockRejectedValueOnce(new Error('Fail 2'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 5, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should throw error after max retries exceeded', async () => {
+            const originalError = new Error('Permanent failure')
+            const fn = jest.fn().mockRejectedValue(originalError)
+
+            await expect(errorHandler.retryWithBackoff(fn, 3, 1)).rejects.toThrow('Permanent failure')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should throw last error from failed attempts', async () => {
+            const error1 = new Error('First error')
+            const error2 = new Error('Second error')
+            const error3 = new Error('Third error')
+
+            const fn = jest.fn()
+                .mockRejectedValueOnce(error1)
+                .mockRejectedValueOnce(error2)
+                .mockRejectedValueOnce(error3)
+
+            await expect(errorHandler.retryWithBackoff(fn, 3, 1)).rejects.toThrow('Third error')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should use default maxRetries when not specified', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('Fail'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, undefined, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(2)
+        })
+
+        it('should use default delay when not specified', async () => {
+            const fn = jest.fn().mockResolvedValue('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 1)
+
+            expect(result).toBe('success')
+        })
+
+        it('should work with synchronous functions', async () => {
+            const fn = jest.fn()
+                .mockReturnValueOnce(Promise.reject(new Error('Fail')))
+                .mockReturnValueOnce(Promise.resolve('success'))
+
+            const result = await errorHandler.retryWithBackoff(fn, 2, 1)
+
+            expect(result).toBe('success')
+        })
+    })
+
+    describe('isValidErrorResponse', () => {
+        it('should return true for error with errorCode', () => {
+            const errorData = { errorCode: 'PAYMENT_FAILED' }
+            expect(errorHandler.isValidErrorResponse(errorData)).toBeTruthy()
+        })
+
+        it('should return true for error with message', () => {
+            const errorData = { message: 'Payment declined' }
+            expect(errorHandler.isValidErrorResponse(errorData)).toBeTruthy()
+        })
+
+        it('should return false for null error', () => {
+            expect(errorHandler.isValidErrorResponse(null)).toBeFalsy()
+        })
+
+        it('should return false for undefined error', () => {
+            expect(errorHandler.isValidErrorResponse(undefined)).toBeFalsy()
+        })
+
+        it('should return false for empty object', () => {
+            expect(errorHandler.isValidErrorResponse({})).toBeFalsy()
+        })
+
+        it('should return true for error with additional properties', () => {
+            const errorData = {
+                errorCode: 'VALIDATION_ERROR',
+                message: 'Invalid input',
+                details: { field: 'cardNumber' }
+            }
+            expect(errorHandler.isValidErrorResponse(errorData)).toBeTruthy()
+        })
+    })
 })

@@ -263,7 +263,7 @@ describe('JPMCCheckoutProvider', () => {
         })
 
         it('uses useBasketHook when provided', () => {
-            const mockBasket = { basketId: 'basket123', orderTotal: 99.99 }
+            const mockBasket = { basketId: 'basket123', orderTotal: 99.99, currency: 'USD' }
             const mockUseBasketHook = jest.fn().mockReturnValue({ data: mockBasket })
 
             renderHook(() => useJPMCCheckout(), {
@@ -274,7 +274,7 @@ describe('JPMCCheckoutProvider', () => {
         })
 
         it('uses basket prop directly when provided', () => {
-            const mockBasket = { basketId: 'basket123', orderTotal: 99.99 }
+            const mockBasket = { basketId: 'basket123', orderTotal: 99.99, currency: 'USD' }
 
             renderHook(() => useJPMCCheckout(), {
                 wrapper: createWrapper({ basket: mockBasket })

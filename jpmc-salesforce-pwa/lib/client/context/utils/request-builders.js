@@ -16,6 +16,7 @@ import {
     getCardType
 } from './session-storage'
 import { detectCardType } from '../../../utils/validation'
+import { toMinorUnits } from '../../../utils/currency'
 
 // =============================================================================
 // Token Resolution
@@ -249,7 +250,7 @@ export function buildTokenAuthRequest({
     const paymentInstrument = basket?.paymentInstruments?.[0]
     const paymentCard = paymentInstrument?.paymentCard
     
-    const amount = overrides.amount || Math.round((basket?.orderTotal || 0) * 100)
+    const amount = overrides.amount || toMinorUnits(basket?.orderTotal || 0, overrides.currency || basket?.currency)
     const currency = overrides.currency || basket?.currency
     
     // CRITICAL: merchantOrderNumber is REQUIRED - must be orderNo from SFCC order
@@ -316,7 +317,7 @@ export function buildCardAuthRequest({
     overrides = {}
 }) {
     const paymentInstrument = basket?.paymentInstruments?.[0]
-    const amount = overrides.amount || Math.round((basket?.orderTotal || 0) * 100)
+    const amount = overrides.amount || toMinorUnits(basket?.orderTotal || 0, overrides.currency || basket?.currency)
     const currency = overrides.currency || basket?.currency
     
     // Build card object based on whether data is encrypted

@@ -8,6 +8,8 @@
  * @internal
  */
 
+import { toMinorUnits } from '../../../utils/currency'
+
 /**
  * Encrypt card data using PIE SDK or return plain card data
  * 
@@ -91,7 +93,7 @@ export const buildVerifyRequest = ({ encryptedData, cardData, basket, billingAdd
             countryCode: cardData.billingAddress.countryCode
         } : billingAddress,
         currency: basket?.currency,
-        amount: Math.round((basket?.orderTotal || 0) * 100),
+        amount: toMinorUnits(basket?.orderTotal || 0, basket?.currency),
         kountSessionId: kountSessionId || undefined,
         fraudShoppingCart: fraudCart,
         shipTo: fraudShipTo

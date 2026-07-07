@@ -154,6 +154,8 @@ export {
     checkAvailablePaymentMethods 
 } from '../hooks/useAvailablePaymentMethods'
 
+export { useServerSideCreateOrder } from '../hooks/useServerSideCreateOrder'
+
 // =============================================================================
 // GOOGLE PAY COMPONENTS
 // =============================================================================
@@ -269,6 +271,25 @@ export { ThreeDSModal } from './components'
  * ```
  */
 export { transformPWAKitFormData, mapPWAKitCardType } from '../utils/form-transformer'
+
+// =============================================================================
+// LOCALIZATION & DISPLAY LABELS
+// =============================================================================
+
+/**
+ * Display Item Labels for Apple Pay & Google Pay
+ * 
+ * Provides localized labels for payment display items (shipping, tax, total).
+ * 
+ * Usage:
+ * ```jsx
+ * import { getDisplayItemLabels } from '@jpmorgan/jpmorgan-salesforce-pwa/client'
+ * 
+ * const labels = getDisplayItemLabels(intl)
+ * // Returns: { shipping: 'Shipping', tax: 'Tax', total: 'Total' }
+ * ```
+ */
+export { getDisplayItemLabels } from '../utils/label-fetcher'
 
 // =============================================================================
 // PAYMENT ERROR HANDLING & REDIRECT

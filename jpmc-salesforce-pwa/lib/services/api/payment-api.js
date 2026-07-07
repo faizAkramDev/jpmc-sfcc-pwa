@@ -228,7 +228,7 @@ export const callFraudCheck = async ({ config, fraudPayload }) => {
 
     const headers = buildJPMCHeaders({ merchantId, platformId, requestId, accessToken: token })
 
-    logger.info('[Fraud Check] RAW REQUEST:', safeStringify(fraudPayload))
+    logger.debug('[Fraud Check] RAW REQUEST:', safeStringify(fraudPayload))
 
     try {
         let response = await fetch(url, {
@@ -251,7 +251,7 @@ export const callFraudCheck = async ({ config, fraudPayload }) => {
         }
 
         const data = await response.json()
-        logger.info('[Fraud Check] RAW RESPONSE:', safeStringify(data))
+        logger.debug('[Fraud Check] RAW RESPONSE:', safeStringify(data))
 
         if (!response.ok) {
             logger.warn('[Fraud Check] Fraud API returned error status:', response.status, '- failing open')

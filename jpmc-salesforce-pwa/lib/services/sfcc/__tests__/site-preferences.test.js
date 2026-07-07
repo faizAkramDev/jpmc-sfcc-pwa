@@ -11,7 +11,9 @@ const {
     getSitePreferences,
     getJPMCPreferences,
     refreshSitePreferences,
-    clearPreferencesCache
+    clearPreferencesCache,
+    getApplePayPreferences,
+    clearApplePayPreferencesCache
 } = require('../site-preferences')
 
 // =============================================================================
@@ -38,6 +40,7 @@ describe('SFCC Site Preferences Service', () => {
         process.env = { ...originalEnv }
         global.fetch.mockReset()
         clearPreferencesCache()
+        clearApplePayPreferencesCache()
 
         // Set up required env vars (matching getSFCCConfig requirements)
         process.env.COMMERCE_API_CLIENT_ID_PRIVATE = 'test-client-id'
@@ -227,6 +230,82 @@ describe('SFCC Site Preferences Service', () => {
             await getSitePreferences()
 
             expect(global.fetch).toHaveBeenCalledTimes(4)
+        })
+    })
+
+    describe('getApplePayPreferences', () => {
+        it('should disable Apple Pay when merchant ID missing', async () => {
+            const mockPreferences = [
+                { id: 'jpmcApplePayEnabled', value: 'true' }
+            ]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            const result = await getApplePayPreferences()
+
+            expect(result.enabled).toBe(false)
+            expect(result.merchantId).toBeNull()
+        })
+
+        it('should force refresh Apple Pay config', async () => {
+            const mockPreferences = [
+                { id: 'jpmcApplePayMerchantId', value: 'merchant123' }
+            ]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getApplePayPreferences()
+            await getApplePayPreferences({ forceRefresh: true })
+
+            expect(global.fetch).toHaveBeenCalledTimes(4)
+        })
+
+        it('should return null when API fails and no cache', async () => {
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce({
+                    ok: false,
+                    status: 500,
+                    text: () => Promise.resolve('Error')
+                })
+
+            const result = await getApplePayPreferences()
+            expect(result).toBeNull()
+        })
+
+        it('should use default values when preferences missing', async () => {
+            const mockPreferences = [
+                { id: 'jpmcApplePayMerchantId', value: 'merchant123' }
+            ]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            const result = await getApplePayPreferences()
+
+            expect(result.countryCode).toBe('US')
+        })
+
+        it('should parse comma-separated networks', async () => {
+            const mockPreferences = [
+                { id: 'jpmcApplePayMerchantId', value: 'merchant' },
+                { id: 'jpmcApplePaySupportedNetworks', value: ' visa , masterCard , amex ' }
+            ]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            const result = await getApplePayPreferences()
+            expect(result.supportedNetworks).toContain('visa')
+            expect(result.supportedNetworks).toContain('masterCard')
         })
     })
 })

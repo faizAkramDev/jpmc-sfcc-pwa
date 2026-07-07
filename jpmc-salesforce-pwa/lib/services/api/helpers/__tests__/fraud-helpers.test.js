@@ -153,7 +153,7 @@ describe('buildFraudCheckPayload', () => {
         expect(payload.accountHolder.deviceIPAddress).toBe('192.168.1.1')
     })
 
-    it('defaults to USD currency when not provided', () => {
+    it('passes currency as undefined when not provided', () => {
         const payload = buildFraudCheckPayload({
             config: mockConfig,
             card: mockCard,
@@ -163,7 +163,7 @@ describe('buildFraudCheckPayload', () => {
             amount: 1000
         })
 
-        expect(payload.currency).toBe('USD')
+        expect(payload.currency).toBeUndefined()
     })
 
     it('rounds amount to integer', () => {
