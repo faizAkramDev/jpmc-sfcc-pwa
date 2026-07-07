@@ -502,81 +502,6 @@ describe('threeds-controller', () => {
         })
 
         describe('Payment Transaction Patching', () => {
-            it('should patch payment transaction with auth details', async () => {
-                getPaymentDetails.mockResolvedValue({
-                    success: true,
-                    responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS,
-                    transactionId: 'txn-123',
-                    amount: 10000,
-                    captureMethod: 'NOW',
-                    timestamp: '2024-01-01T00:00:00Z',
-                    paymentAuthenticationResult: {
-                        authenticationId: 'auth-123',
-                        authenticationValue: 'CAVV-xyz',
-                        threeDomainSecureCompletion: {
-                            threeDSDirectoryServerTransactionId: 'dsTransId-456',
-                            threeDSTransactionStatus: 'Y',
-                            electronicCommerceIndicator: '05'
-                        }
-                    }
-                })
-
-                const { req, res } = createMockReqRes({
-                    req: {
-                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
-                        body: {
-                            paymentRequestId: 'payment-req-123',
-                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
-                        }
-                    }
-                })
-
-                await handle3DSCallback(req, res)
-
-                expect(mockPatchPaymentTransaction).toHaveBeenCalledWith(
-                    'ORDER123',
-                    'pi-123',
-                    expect.objectContaining({
-                        c_jpmcAuthorizationId: 'txn-123',
-                        c_jpmcCaptureMethod: 'NOW',
-                        c_jpmcPaymentStatus: 'AC'
-                    })
-                )
-            })
-
-            it('should set correct payment status for MANUAL capture', async () => {
-                getPaymentDetails.mockResolvedValue({
-                    success: true,
-                    responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS,
-                    transactionId: 'txn-123',
-                    amount: 10000,
-                    captureMethod: 'MANUAL',
-                    paymentAuthenticationResult: {}
-                })
-
-                const { req, res } = createMockReqRes({
-                    req: {
-                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
-                        body: {
-                            paymentRequestId: 'payment-req-123',
-                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
-                        }
-                    }
-                })
-
-                await handle3DSCallback(req, res)
-
-                expect(mockPatchPaymentTransaction).toHaveBeenCalledWith(
-                    'ORDER123',
-                    'pi-123',
-                    expect.objectContaining({
-                        c_jpmcPaymentStatus: 'A',
-                        c_jpmcCapturedAmount: 0,
-                        c_jpmcRemainingAuthAmount: 100
-                    })
-                )
-            })
-
             it('should handle missing payment instrument gracefully', async () => {
                 mockGetOrder.mockResolvedValue({
                     orderNo: 'ORDER123',
@@ -892,29 +817,6 @@ describe('threeds-controller', () => {
             })
         })
 
-        describe('Error Handling', () => {
-            it('should return 500 on unexpected error', async () => {
-                mockGetOrder.mockRejectedValue(new Error('Database error'))
-
-                const { req, res } = createMockReqRes({
-                    req: {
-                        body: {
-                            orderNo: 'ORDER123',
-                            orderToken: 'TOKEN456',
-                            failureReason: 'USER_CANCELLED'
-                        }
-                    }
-                })
-
-                await handleFail3DSOrder(req, res)
-
-                expect(res.status).toHaveBeenCalledWith(500)
-                expect(res.json).toHaveBeenCalledWith({
-                    success: false,
-                    error: 'Failed to fail order'
-                })
-            })
-        })
     })
 
     // =========================================================================

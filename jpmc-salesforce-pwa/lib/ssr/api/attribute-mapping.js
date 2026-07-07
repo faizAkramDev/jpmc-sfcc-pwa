@@ -102,6 +102,7 @@ export const AUTH_ORDER_ATTRIBUTE_MAPPING = {
  * @type {Object.<string, string|function>}
  */
 export const PAYMENT_TRANSACTION_ATTRIBUTE_MAPPING = {
+    c_jpmcTransactionId: 'transactionId',
     c_jpmcAuthorizationId: 'transactionId',
     
     c_jpmcCaptureMethod: 'captureMethod',

@@ -14,6 +14,7 @@ import { THREE_DS } from '../../utils/constants.mjs'
 import logger, { safeStringify } from '../../utils/logger.js'
 import { getJPMCConfigAsync } from '../index.js'
 import { fromMinorUnits } from '../../utils/currency.js'
+import { mapJPMCResponseToAttributes } from '../api/attribute-mapping.js'
 
 /**
  * Cache to track processed callbacks and prevent duplicate processing.
@@ -311,52 +312,51 @@ function buildEmptyThreeDSValues() {
  */
 async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSValues) {
     const orderApi = new OrderApiClient()
-    const order = await orderApi.getOrder(orderNo)
-    
+
     if (!isSuccess) {
-        // FAILED 3DS: Only change status to 'failed', no patches allowed
-        if (order.status !== 'failed') {
-            await orderApi.updateOrderStatus(orderNo, 'failed')
-            if (controllerConfig.debug) {
-                logger.info('[3DS Controller] Updated order status to failed:', { orderNo, oldStatus: order.status })
-            }
+        await orderApi.updateOrderStatus(orderNo, 'failed')
+        if (controllerConfig.debug) {
+            logger.info('[3DS Controller] Updated order status to failed:', { orderNo })
         }
         return // No patches for failed orders
     }
-    
-    // SUCCESS 3DS: Change status to 'new' and apply patches
-    const newStatus = 'new'
-    
-    // STEP 1: Change order status to 'new' FIRST
-    // This MUST happen BEFORE any patches, as the order must be in 'new' status to be patchable
-    if (order.status !== newStatus) {
-        await orderApi.updateOrderStatus(orderNo, newStatus)
-        if (controllerConfig.debug) {
-            logger.info('[3DS Controller] Updated order status:', { orderNo, oldStatus: order.status, newStatus })
-        }
+
+    // SUCCESS 3DS:
+    // STEP 1: Promote CREATED→NEW first — MUST happen before any GET or PATCH.
+    await orderApi.updateOrderStatus(orderNo, 'new')
+    if (controllerConfig.debug) {
+        logger.info('[3DS Controller] Updated order status to new:', { orderNo })
     }
-    
-    // STEP 2: Get payment instrument for patching
+
+    // STEP 2: Now GET the order (succeeds because order is NEW)
+    const order = await orderApi.getOrder(orderNo)
+
+    // STEP 3: Get payment instrument for patching
     const paymentInstrument = order.paymentInstruments?.[0]
     const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
-    
+
     if (!paymentInstrumentId) {
         throw new Error('No paymentInstrumentId found - cannot patch PaymentTransaction')
     }
-    
-    // STEP 3: Build payloads for order and payment transaction patches
+
+    // STEP 4: Build payloads for order and payment transaction patches
     const { paymentTransactionPayload, orderPayload } = buildOrderPatchPayloads(
         paymentDetails, threeDSValues, isSuccess, order.currency
     )
-    
-    // STEP 4: Patch payment transaction if needed
+
+    // STEP 4: Patch payment instrument (sets c_jpmcTransactionId, c_jpmcCardTypeName on OrderPaymentInstrument)
+    const piAttributes = mapJPMCResponseToAttributes(paymentDetails)
+    if (Object.keys(piAttributes).length > 0) {
+        await orderApi.patchPaymentInstrument(orderNo, paymentInstrumentId, piAttributes)
+    }
+
     if (Object.keys(paymentTransactionPayload).length > 0) {
         if (controllerConfig.debug) {
             logger.info('[3DS Controller] Patching PaymentTransaction:', orderNo, paymentInstrumentId)
         }
         await orderApi.patchPaymentTransaction(orderNo, paymentInstrumentId, paymentTransactionPayload)
     }
-    
+
     // STEP 5: Patch order if needed
     if (Object.keys(orderPayload).length > 0) {
         if (controllerConfig.debug) {
@@ -386,6 +386,7 @@ function buildOrderPatchPayloads(paymentDetails, threeDSValues, isSuccess, curre
     const threeDSCompletion = authResult.threeDomainSecureCompletion || {}
 
     const paymentTransactionPayload = {
+        c_jpmcTransactionId: paymentDetails.transactionId,
         c_jpmcAuthorizationId: paymentDetails.transactionId,
         c_jpmcCaptureMethod: captureMethod,
         c_jpmcAuthTimestamp: paymentDetails.timestamp || new Date().toISOString(),
@@ -649,35 +650,48 @@ export async function handleFail3DSOrder(req, res) {
 
         const orderApi = new OrderApiClient()
 
-        const order = await orderApi.getOrder(orderNo)
-        if (!order.c_pending3DSAuthentication) {
-            logger.warn('[3DS Controller] Order not pending 3DS:', orderNo)
-            return res.status(400).json({
-                success: false,
-                error: 'Order is not pending 3DS authentication'
-            })
+        try {
+            const order = await orderApi.getOrder(orderNo)
+            if (!order.c_pending3DSAuthentication) {
+                logger.warn('[3DS Controller] Order not pending 3DS:', orderNo)
+                return res.status(400).json({
+                    success: false,
+                    error: 'Order is not pending 3DS authentication'
+                })
+            }
+        } catch (err) {
+            logger.debug('[3DS Controller] Could not GET order for pending check (likely CREATED):', orderNo, err.message)
         }
 
-        // Step 1: Mark order as failed in SFCC
+        // Step 1: Patch order custom attributes.
+        // Order may be CREATED — order-level PATCH works on CREATED with admin OAuth.
         await orderApi.patchOrder(orderNo, {
             c_pending3DSAuthentication: false,
             c_threeDSTransactionStatus: THREE_DS.TRANSACTION_STATUS.UNAVAILABLE,
             c_threeDSFailureReason: failureReason
         })
 
-        await orderApi.updateOrderStatus(orderNo, 'failed')
-
-        // Step 2: Attempt to reopen basket via SCAPI (optional, best-effort)
+        // Step 2: Attempt to fail order + reopen basket atomically via SCAPI.
         let basketReopenResult = { basketReopened: false, basketId: null }
         const authHeader = req.headers.authorization
         if (authHeader && commerceConfig) {
             const token = authHeader.replace('Bearer ', '')
             basketReopenResult = await attemptReopenBasketViaSCAPI(orderNo, token, commerceConfig)
         } else {
-            logger.debug('[3DS Controller] Skipping basket reopen: missing auth header or commerceConfig', {
+            logger.debug('[3DS Controller] Skipping SCAPI basket reopen: missing auth header or commerceConfig', {
                 hasAuth: !!authHeader,
                 hasConfig: !!commerceConfig
             })
+        }
+
+        // Step 3: Belt-and-suspenders — ensure order is marked FAILED via admin OAuth.
+        if (!basketReopenResult.basketReopened) {
+            try {
+                await orderApi.updateOrderStatus(orderNo, 'failed')
+            } catch (err) {
+                // Swallow — order may already be in a terminal state
+                logger.warn('[3DS Controller] Admin fail fallback:', orderNo, err.message)
+            }
         }
 
         return res.json({
