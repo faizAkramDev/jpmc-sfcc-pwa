@@ -113,7 +113,7 @@ export const buildFraudCheckPayload = ({
 
     const payload = {
         amount: Math.round(Number.parseFloat(amount) || 0),
-        currency,
+        currency: currency || 'USD',
         accountHolder: {
             ...(accountHolder?.email && { email: accountHolder.email }),
             ...(accountHolder?.fullName && { fullName: accountHolder.fullName }),
@@ -124,7 +124,7 @@ export const buildFraudCheckPayload = ({
         paymentMethodType: {
             card: buildCardForFraud(card, resolvedAccountNumberType)
         },
-        merchant: buildMerchant(config),
+        merchant: buildMerchant(config, true),
         fraudScore: {
             isFraudRuleReturn: true,
             ...(userAgent && { cardholderBrowserInformation: userAgent }),

@@ -10,7 +10,9 @@
 import logger from '../../utils/logger.js'
 
 // Import shared display items builder (single source of truth)
+// Re-exported for backward compatibility with existing consumers
 import { buildDisplayItemsFromBasket } from '../../client/utils/display-items.js'
+export { buildDisplayItemsFromBasket }
 
 // =============================================================================
 // Constants
@@ -456,8 +458,8 @@ export const buildGooglePayShippingResponse = (basket, shippingMethods, defaultM
         .map(translateSFCCShippingMethodToGooglePay)
         .filter(Boolean)
 
-    // Uses English labels (localization happens at consuming app level)
-    const displayItems = buildDisplayItemsFromBasket(basket, basket.currency)
+    // Build display items from basket
+    const displayItems = buildDisplayItemsFromBasket(basket)
 
     // Determine default selection
     const selectedMethodId = defaultMethodId || gpayShippingOptions[0]?.id
@@ -471,7 +473,7 @@ export const buildGooglePayShippingResponse = (basket, shippingMethods, defaultM
             totalPriceStatus,
             totalPrice: String(basket.orderTotal || basket.productSubTotal || '0.00'),
             totalPriceLabel: totalPriceStatus === 'ESTIMATED' ? 'Est. Total' : 'Total',
-            currencyCode: basket.currency,
+            currencyCode: basket.currency || 'USD',
             displayItems
         }
     }
@@ -505,6 +507,7 @@ export default {
     // Address translators
     translateGooglePayAddressToSFCC,
     translateSFCCShippingMethodToGooglePay,
+    buildDisplayItemsFromBasket,
     // Basket operations
     updateShippingAddress,
     getShippingMethods,

@@ -17,10 +17,7 @@ const DEFAULT_GOOGLE_PAY_METHOD_ID = 'JPMC_GOOGLE_PAY'
 const DEFAULT_CREDIT_CARD_METHOD_ID = 'CREDIT_CARD'
 const DEFAULT_APPLE_PAY_METHOD_ID = 'DW_APPLE_PAY'
 
-/**
- * Cache for default locale - prevents repeated sites.js resolution
- * @type {string|null}
- */
+// Cache for default locale from sites.js
 let cachedDefaultLocale = null
 
 /**
@@ -54,8 +51,7 @@ const resolveSitesConfig = () => {
 /**
  * Get the default locale from sites.js configuration
  * Apple Pay is ONLY supported for the default locale
- * @param {string} defaultLocale - Default locale passed from consumer (e.g., 'en-US')
- * @returns {string} Default locale
+ * @returns {string} Default locale (e.g., 'en-US')
  */
 const getDefaultLocale = () => {
     // Return cached value if already loaded
@@ -94,17 +90,16 @@ const getDefaultLocale = () => {
  * Apple Pay does NOT support multi-locale configuration
  * Normalizes locale formats (en-US vs en_US)
  * @param {string} locale - Locale to check (e.g., 'en-CA', 'en_CA')
- * @param {string} defaultLocale - Default locale (e.g., 'en-US')
  * @returns {boolean} True if locale is the default locale
  */
-const isDefaultLocale = (locale, defaultLocale) => {
+const isDefaultLocale = (locale) => {
     if (!locale) return true // If no locale specified, assume default
     
-    const defaultLoc = getDefaultLocale(defaultLocale)
+    const defaultLocale = getDefaultLocale()
     
     // Normalize both locales (replace _ with -)
     const normalizedLocale = locale.replace(/_/g, '-')
-    const normalizedDefault = defaultLoc.replace(/_/g, '-')
+    const normalizedDefault = defaultLocale.replace(/_/g, '-')
     
     return normalizedLocale === normalizedDefault
 }
@@ -118,7 +113,6 @@ const isDefaultLocale = (locale, defaultLocale) => {
  * @param {boolean} options.isGooglePayReady - Google Pay SDK ready state
  * @param {boolean} options.isGooglePayAvailable - Google Pay browser availability
  * @param {string} options.locale - Locale ID for multi-MID support (e.g., 'en_CA')
- * @param {string} options.defaultLocale - Default locale (e.g., 'en-US') - optional, defaults to 'en-US'
  * @returns {object} Payment methods state and derived values
  */
 export function usePaymentMethods({
@@ -127,8 +121,7 @@ export function usePaymentMethods({
     isGooglePayReady = false,
     isGooglePayAvailable = false,
     isApplePayAvailable = false,
-    locale,
-    defaultLocale = 'en-US'
+    locale
 }) {
     // ==========================================================================
     // State
@@ -235,14 +228,14 @@ export function usePaymentMethods({
     const isApplePayEnabled = useMemo(() => {
         // Apple Pay is ONLY supported for the default locale (no multi-locale support)
         // Check locale first before any other checks
-        if (!isDefaultLocale(locale, defaultLocale)) {
+        if (!isDefaultLocale(locale)) {
             return false
         }
         
         const bmEnabled = activePaymentMethods?.isLoading || 
                activePaymentMethods?.isApplePayActive !== false
         return isApplePayAvailable && bmEnabled
-    }, [locale, defaultLocale, isApplePayAvailable, activePaymentMethods?.isLoading, activePaymentMethods?.isApplePayActive])
+    }, [locale, isApplePayAvailable, activePaymentMethods?.isLoading, activePaymentMethods?.isApplePayActive])
     
     // ==========================================================================
     // Return

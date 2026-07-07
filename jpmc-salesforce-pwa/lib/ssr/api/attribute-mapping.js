@@ -22,7 +22,10 @@ import logger from '../../utils/logger.js'
  * @type {Object.<string, string|function>}
  */
 export const DEFAULT_ATTRIBUTE_MAPPING = {
-    c_jpmcTransactionId: (response) => response.paymentGatewayTransactionId || response.transactionId || null,
+    c_jpmcTransactionId: 'transactionId',
+    // Card type name from JPMC (e.g., VISA, MASTERCARD, DISCOVER, JCB, DINERS)
+    // Used to conditionally skip 3DS for unsupported card types
+    // Fallback chain: cardTypeName (full name) -> cardType (short code: VI, MC, AX) -> null
     c_jpmcCardTypeName: (response) => 
         response.cardTypeName || 
         response.paymentMethodType?.card?.cardTypeName || 
@@ -99,7 +102,7 @@ export const AUTH_ORDER_ATTRIBUTE_MAPPING = {
  * @type {Object.<string, string|function>}
  */
 export const PAYMENT_TRANSACTION_ATTRIBUTE_MAPPING = {
-    c_jpmcAuthorizationId: (response) => response.paymentGatewayTransactionId || response.transactionId || null,
+    c_jpmcAuthorizationId: 'transactionId',
     
     c_jpmcCaptureMethod: 'captureMethod',
     

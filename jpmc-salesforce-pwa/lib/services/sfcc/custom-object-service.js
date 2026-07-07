@@ -119,15 +119,7 @@ const CUSTOM_OBJECT_ATTRIBUTE_MAPPING = {
     // Apple Pay configuration is only read from Site Preferences for the default locale
 
     // 3D Secure Configuration
-    jpmc3DSEnabled: 'jpmc3DSEnabled',
-
-    // Drop-in UI Configuration (allows per-locale override of payment method)
-    // These fields enable different payment flows per locale (e.g., Drop-in for EU, PIE for US)
-    checkoutMode: 'checkoutMode',
-    dropInScriptUrl: 'dropInScriptUrl',
-    dropInThemeOverrides: 'dropInThemeOverrides',
-    saveConsumerProfile: 'saveConsumerProfile',
-    dropInControlledSubmit: 'dropInControlledSubmit'
+    jpmc3DSEnabled: 'jpmc3DSEnabled'
 }
 
 // =============================================================================
@@ -363,21 +355,10 @@ export const getCustomObjectConfig = async (options = {}) => {
         })
 
         if (config) {
-            logger.info(`[Custom Object Service] ✅ Loaded config for locale "${locale}":`, {
-                locale,
-                objectKey,
-                hasCheckoutMode: !!config.checkoutMode,
-                checkoutMode: config.checkoutMode || 'not set',
-                hasMerchantId: !!config.merchantId,
-                hasApiHost: !!config.apiHost,
-                hasGooglePay: !!config.googlePayMerchantName
-            })
-        } else {
-            logger.info(`[Custom Object Service] ⚠️  Custom object found but returned empty config for locale "${locale}"`, {
-                locale,
-                objectKey,
-                reason: 'Custom object exists but has no mapped attributes'
-            })
+            logger.info(`[Custom Object Service] Loaded config for locale "${locale}":`)
+            logger.info(`[Custom Object Service]   - Merchant ID: ${config.merchantId || 'not set'}`)
+            logger.info(`[Custom Object Service]   - API Host: ${config.apiHost || 'not set'}`)
+            logger.info(`[Custom Object Service]   - Google Pay Merchant: ${config.googlePayMerchantName || 'not set'}`)
         }
 
         return config
@@ -385,24 +366,10 @@ export const getCustomObjectConfig = async (options = {}) => {
     } catch (error) {
         // Re-throw auth errors as-is
         if (error.code === MULTI_LOCALE_ERROR_CODES.AUTH_ERROR) {
-            logger.error(`[Custom Object Service] ❌ Authentication error fetching custom object for locale "${locale}":`, {
-                locale,
-                objectKey,
-                errorCode: error.code,
-                statusCode: error.statusCode,
-                reason: 'SLAS token may be missing, expired, or lack required "sfcc.shopper-custom-objects" scope',
-                fallback: 'Will fall back to Site Preferences'
-            })
             throw error
         }
 
         // Wrap other errors
-        logger.error(`[Custom Object Service] ❌ Failed to fetch custom object for locale "${locale}":`, {
-            locale,
-            objectKey,
-            errorMessage: error.message,
-            reason: 'Possible 404 (key does not exist) or API error'
-        })
         const wrappedError = new Error(
             `[${MULTI_LOCALE_ERROR_CODES.FETCH_ERROR}] Failed to fetch locale config for "${locale}": ${error.message}`
         )

@@ -8,9 +8,9 @@
  * 1. In ssr.js: Use createJPMCHandler() instead of runtime.createHandler()
  * 2. That's it! Routes, CSP, and checkout enhancement are automatic.
  * 
- * MANUAL INTEGRATION (Advanced):
- * ==============================
- * 1. Register server routes in ssr.js: registerJPMCEndpoints(app, runtime)
+ * MANUAL INTEGRATION (Legacy):
+ * ============================
+ * 1. Register server routes in ssr.js: registerJPMCRoutes(app)
  * 2. Add CSP headers: jpmorganCSPMiddleware()
  * 3. Wrap checkout with JPMCCheckoutProvider
  * 4. Use useJPMCCheckout hook for payment flow
@@ -28,6 +28,7 @@ export {
     createJPMCHandler,
     getJPMCConfig,
     validateConfig,
+    registerJPMCRoutes,
     registerJPMCEndpoints,
     jpmorganCSPMiddleware,
     mergeCSPDirectives,
@@ -56,7 +57,6 @@ export { default as useGooglePay } from './hooks/useGooglePay'
 export { default as useApplePay } from './hooks/useApplePay'
 export { useJPMCPlaceOrder } from './hooks/useJPMCPlaceOrder'
 export { useAvailablePaymentMethods, checkAvailablePaymentMethods } from './hooks/useAvailablePaymentMethods'
-export { useDropInPaymentSuccess } from './hooks/useDropInPaymentSuccess'
 
 
 // =============================================================================
@@ -113,14 +113,6 @@ export {
     maskCardNumber,
     luhnCheck
 } from './utils/validation'
-
-// Drop-in UI payload normalizer
-// Handles payload format variants from the Drop-in SDK
-export {
-    normalizeDropInPayload,
-    isPaymentSuccessful,
-    isThreeDSDeferred
-} from './utils/drop-in-payload-normalizer'
 
 // Error handling utilities
 export {

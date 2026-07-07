@@ -16,12 +16,11 @@ import logger from './logger.js'
 
 /**
  * Supported locale formats:
- * - Two-part: en-CA, en-US, en_CA, fr_FR (2 lowercase + hyphen/underscore + 2+ alphanumeric)
- * - Three-part BCP47: zh-Hans-CN, zh_Hans_CN (language-script-region)
- * - Numeric regions: en-001 (World region code)
- * - All variants require country/region code (not language-only like /en/)
+ * - en-CA (hyphen, PWA Kit default)
+ * - en_CA (underscore, SFCC internal)
+ * - en-US, fr-FR, de-DE, etc.
  */
-const LOCALE_PATTERN = /^\/([a-z]{2}[-_](?:[A-Z][A-Za-z0-9]*|[0-9]{2,})(?:[-_][A-Za-z0-9]{2,})?)(\/|$)/
+const LOCALE_PATTERN = /^\/([a-z]{2}[-_][A-Z]{2})(\/|$)/
 
 /**
  * Extract locale from Referer header URL

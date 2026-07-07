@@ -44,11 +44,7 @@ const JPMC_CSP_DIRECTIVES = {
         // Apple Pay
         'https://applepay.cdn-apple.com',
         // Kount device fingerprinting SDK
-        'https://*.kaptcha.com',
-        // Chase Device Fingerprinting (DFP) for fraud detection
-        'https://dfp-static.chase.com',
-        // JPMC Drop-in UI (CAT + prod: checkout-cat.merchant.jpmorgan.com / checkout.merchant.jpmorgan.com)
-        'https://*.merchant.jpmorgan.com'
+        'https://*.kaptcha.com'
     ],
     
     // API connections
@@ -70,16 +66,6 @@ const JPMC_CSP_DIRECTIVES = {
         'https://*.googleapis.com',
         // Kount device fingerprinting (tst.kaptcha.com = TEST, ssl.kaptcha.com = PROD)
         'https://*.kaptcha.com',
-        // Chase Device Fingerprinting (DFP) API endpoint for fraud detection
-        'https://dfp-static.chase.com',
-        // JPMC Drop-in UI runtime connections
-        'https://*.merchant.jpmorgan.com',
-        // Split.io feature flagging (used by payment methods like iDEAL)
-        'https://auth.split.io',
-        'https://sdk.split.io',
-        'https://streaming.split.io',
-        // Datadog RUM (real user monitoring for payment methods)
-        'https://browser-intake-datadoghq.com',
         // Apple Pay - All gateway domains
         'https://apple-pay-gateway.apple.com',
         'https://apple-pay-gateway-cert.apple.com',
@@ -100,7 +86,6 @@ const JPMC_CSP_DIRECTIVES = {
     'frame-src': [
         "'self'",
         'https://*.jpmorgan.com',
-        'https://*.merchant.jpmorgan.com',
         'https://*.chasepaymentech.com',
         // Kount device fingerprinting iframe (tst.kaptcha.com = TEST, ssl.kaptcha.com = PROD)
         'https://*.kaptcha.com',

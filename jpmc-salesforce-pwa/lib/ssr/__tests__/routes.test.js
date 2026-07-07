@@ -5,6 +5,7 @@
  */
 
 import {
+    registerJPMCRoutes,
     registerJPMCEndpoints,
     SuccessHandler,
     ErrorHandler

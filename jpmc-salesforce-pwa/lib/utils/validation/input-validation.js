@@ -13,7 +13,6 @@
  */
 
 import logger from '../logger'
-import { toMinorUnits } from '../currency.js'
 
 // =============================================================================
 // Constants
@@ -29,12 +28,11 @@ const SUPPORTED_CURRENCIES = new Set([
 ])
 
 /**
- * Maximum reasonable payment amount in major currency units.
- * 1,000,000 = $1,000,000 USD equivalent.
+ * Maximum reasonable payment amount in minor currency units (cents).
+ * 100,000,000 cents = $1,000,000 (one million US dollars).
  * Adjust based on your business requirements.
- * This is multiplied by currency exponent to get minor units for validation.
  */
-const MAX_PAYMENT_AMOUNT_MAJOR = 1_000_000
+const MAX_PAYMENT_AMOUNT = 100000000  // 100,000,000 cents = $1,000,000
 
 /**
  * Order number validation - SFCC order numbers are alphanumeric
@@ -76,11 +74,10 @@ const MAX_LENGTHS = {
 /**
  * Validate payment amount
  * 
- * @param {*} amount - Amount to validate (in minor units - cents, yen, etc.)
- * @param {string} currency - ISO 4217 currency code for max amount calculation
+ * @param {*} amount - Amount to validate
  * @returns {ValidationResult}
  */
-export const validateAmount = (amount, currency = 'USD') => {
+export const validateAmount = (amount) => {
     // Must be present
     if (amount === undefined || amount === null) {
         return { valid: false, field: 'amount', code: 'REQUIRED', error: 'Amount is required' }
@@ -98,11 +95,10 @@ export const validateAmount = (amount, currency = 'USD') => {
         return { valid: false, field: 'amount', code: 'INVALID_RANGE', error: 'Amount must be greater than 0' }
     }
 
-    // Must be within reasonable range (converted to minor units for currency)
-    const maxMinorUnits = toMinorUnits(MAX_PAYMENT_AMOUNT_MAJOR, currency)
-    if (numAmount > maxMinorUnits) {
+    // Must be within reasonable range
+    if (numAmount > MAX_PAYMENT_AMOUNT) {
         logger.warn('[Validation] Suspiciously large amount:', numAmount)
-        return { valid: false, field: 'amount', code: 'EXCEEDS_MAX', error: `Amount exceeds maximum allowed for ${currency}` }
+        return { valid: false, field: 'amount', code: 'EXCEEDS_MAX', error: `Amount exceeds maximum allowed (${MAX_PAYMENT_AMOUNT})` }
     }
 
     // Warn on very small amounts (might be test data or error)
@@ -352,7 +348,7 @@ const validateOptionalPaymentFields = ({ currency, token, cardExpiry, merchantOr
 export const validatePaymentRequest = (body) => {
     const { amount, currency, card, token, tokenRef, googlePayToken, cardExpiry, merchantOrderNumber, billingAddress } = body
 
-    const amountResult = validateAmount(amount, currency)
+    const amountResult = validateAmount(amount)
     if (!amountResult.valid) return amountResult
 
     // Accept tokenRef (encrypted token) as valid payment method

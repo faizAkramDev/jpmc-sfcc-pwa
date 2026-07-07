@@ -15,22 +15,18 @@ import { PHONE_COUNTRY_CODES } from '../../../utils/constants.mjs'
 // =============================================================================
 
 
+
 /**
- * Build merchantSoftware object for JPMC API
- * Always includes softwareId with realm and optional siteId
+ * Build merchantSoftware object
+ * Uses hardcoded constants - not configurable via Business Manager
  * 
  * @returns {object} merchantSoftware object for JPMC API
  */
-export const buildMerchantSoftware = () => {
-    const realm = process.env.SFCC_REALM_ID
-    
-    let softwareId = `realm=${realm}`
-    const siteId = process.env.COMMERCE_API_SITE_ID
-    if (siteId) {
-        softwareId = `${softwareId}|site=${siteId}`
-    }
-    
-    return { ...MERCHANT_SOFTWARE, softwareId }
+export const buildMerchantSoftware = (isPreventSoftwareId) => {
+    const orgId = process.env.SFCC_ORG_ID || process.env.COMMERCE_API_ORG_ID || ''
+    const realmMatch = orgId ? /^f_ecom_([^_]+)/.exec(orgId) : null
+    const softwareId = process.env.SFCC_REALM_ID || (realmMatch ? realmMatch[1] : '')
+    return { ...MERCHANT_SOFTWARE, ...(isPreventSoftwareId ? {} : { softwareId }) }
 }
 
 /**
@@ -40,13 +36,17 @@ export const buildMerchantSoftware = () => {
  * @param {object} config - JPMC config with merchant* properties
  * @returns {object} merchant object for JPMC API
  */
-export const buildMerchant = (config = {}) => {
+export const buildMerchant = (config = {}, isPreventSoftwareId = false) => {
     const merchant = {
-        merchantSoftware: buildMerchantSoftware()
+        merchantSoftware: buildMerchantSoftware(isPreventSoftwareId)
     }
     
+    // Only include merchantCategoryCode if configured (4-digit string)
     if (config.merchantCategoryCode && /^\d{4}$/.test(config.merchantCategoryCode)) {
         merchant.merchantCategoryCode = config.merchantCategoryCode
+    } else if (config.merchantCategoryCode) {
+        // Log warning if MCC is configured but invalid format
+        logger.warn('[Request Helpers] Invalid merchantCategoryCode format:', config.merchantCategoryCode, '- must be exactly 4 digits')
     }
     
     return merchant

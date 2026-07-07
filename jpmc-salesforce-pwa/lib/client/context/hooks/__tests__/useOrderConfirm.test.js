@@ -84,8 +84,8 @@ describe('useOrderConfirm', () => {
                     body: JSON.stringify({
                         jpmcResponse: mockJpmcResponse,
                         paymentInstrumentId: 'pi-456',
-                        paymentAmount: 99.99,
-                        captureMethod: 'NOW'
+                        captureMethod: 'NOW',
+                        paymentAmount: 99.99
                     })
                 })
             )
@@ -263,6 +263,7 @@ describe('useOrderConfirm', () => {
                 expect.objectContaining({
                     method: 'POST',
                     body: JSON.stringify({
+                        jpmcResponse: mockJpmcResponse,
                         reason: 'Payment declined',
                         errorCode: 'DECLINED'
                     })

@@ -224,7 +224,7 @@ const buildVerificationPayload = ({ card, accountHolder, billingAddress, currenc
 
     return {
         merchant: {
-            merchantSoftware: buildMerchantSoftware()
+            merchantSoftware: buildMerchantSoftware(true)
         },
         currency,
         paymentMethodType: {
@@ -476,16 +476,6 @@ const patchOrderFor3DSPending = async ({ orderNo, paymentResponse, merchantId, f
         const orderApi = new OrderApiClient()
         const authResult = paymentResponse.paymentAuthenticationResult || {}
         
-        // Step 1: Update order status to 'new'
-        // This is critical for 3DS flows - the order must be in 'new' status
-        // so that the 3DS callback can GET the order and patch it later.
-        // SFCC Orders API returns 403 for GET operations on 'created' orders.
-        try {
-            await orderApi.updateOrderStatus(orderNo, 'new')
-        } catch (err) {
-            logger.warn('[JPMC Authorize] Failed to update order status for 3DS pending:', err.message)
-        }
-        
         const patchPayload = {
             c_jpmcMerchantId: merchantId || null,
             c_pending3DSAuthentication: true,
@@ -548,11 +538,11 @@ export const handleAuthorize = async (req, res) => {
     try {
         const config = await getServerConfigAsync(req)
         
-        logger.debug('[JPMC Authorize] ========== INCOMING REQUEST ==========')
-        logger.debug('[JPMC Authorize] Request body:', safeStringify(req.body))
-        logger.debug('[JPMC Authorize] browserInfo received:', !!req.body.browserInfo)
-        logger.debug('[JPMC Authorize] 3DS config - jpmc3DSEnabled:', config.jpmc3DSEnabled)
-        logger.debug('[JPMC Authorize] ===========================================' )
+        logger.info('[JPMC Authorize] ========== INCOMING REQUEST ==========')
+        logger.info('[JPMC Authorize] Request body:', safeStringify(req.body))
+        logger.info('[JPMC Authorize] browserInfo received:', !!req.body.browserInfo)
+        logger.info('[JPMC Authorize] 3DS config - jpmc3DSEnabled:', config.jpmc3DSEnabled)
+        logger.info('[JPMC Authorize] ===========================================')
         
         if (!config.merchantId) {
             return res.status(500).json({ success: false, errorCode: 'CONFIGURATION_ERROR', message: GENERIC_API_ERROR_MESSAGE })
@@ -706,7 +696,7 @@ export const handleVerify = async (req, res) => {
         }
 
         const { card, accountHolder, billingAddress, currency, amount, fraudShoppingCart, shipTo, kountSessionId } = req.body
-        logger.debug('[JPMC Verify] Incoming verification request:', safeStringify(req.body))
+        logger.info('[JPMC Verify] Incoming verification request:', safeStringify(req.body))
         
         if (!card) {
             return res.status(400).json({

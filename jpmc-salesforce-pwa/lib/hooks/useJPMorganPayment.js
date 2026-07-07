@@ -36,26 +36,15 @@ const fetchJPMCConfig = async ({ locale, getAccessToken, apiBasePath }) => {
         : `${apiBasePath}/config`
     
     const headers = { 'Content-Type': 'application/json' }
-    let slasTokenStatus = 'not_attempted'
-    
     if (getAccessToken) {
         try {
             const token = await getAccessToken()
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`
-                slasTokenStatus = 'obtained'
-            } else {
-                slasTokenStatus = 'null_response'
-                console.warn('[useJPMorganPayment] ⚠️  getAccessToken() returned null/undefined - custom object lookup will be SKIPPED, using Site Preferences instead')
             }
-        } catch (tokenErr) {
-            slasTokenStatus = 'error'
-            console.warn('[useJPMorganPayment] ⚠️  Failed to get SLAS token:', tokenErr?.message, '- custom object lookup will be SKIPPED, using Site Preferences instead')
+        } catch (_tokenErr) {
             // Token fetch failed, proceed without it (will fall back to Site Preferences)
         }
-    } else {
-        slasTokenStatus = 'not_provided'
-        console.warn('[useJPMorganPayment] ⚠️  getAccessToken function not provided - custom object lookup will be SKIPPED, using Site Preferences instead')
     }
     
     const configResponse = await fetch(configUrl, {
@@ -64,11 +53,8 @@ const fetchJPMCConfig = async ({ locale, getAccessToken, apiBasePath }) => {
     })
     
     if (configResponse.ok) {
-        const config = await configResponse.json()
-        
-        return config
+        return await configResponse.json()
     }
-    
     
     return null
 }
@@ -300,17 +286,8 @@ export const useJPMorganPayment = (options = {}) => {
                     pieUrls = serverConfig.pieUrls
                     const captureMethod = serverConfig.captureMethod
                     
-                    
-                    
                     if (mountedRef.current) {
-                        setConfig({
-                            merchantId,
-                            pieUrls,
-                            captureMethod,
-                            checkoutMode: serverConfig.checkoutMode || 'PIE',
-                            dropInEnabled: serverConfig.dropInEnabled === true,
-                            dropInScriptUrl: serverConfig.dropInScriptUrl || null
-                        })
+                        setConfig({ merchantId, pieUrls, captureMethod })
                     }
                 }
             }

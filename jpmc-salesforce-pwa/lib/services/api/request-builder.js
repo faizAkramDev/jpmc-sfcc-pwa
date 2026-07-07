@@ -19,16 +19,19 @@ import {
 import logger from '../../utils/logger'
 import { is3DSEnabled, build3DSAuthenticationParameters } from './helpers/threeds-helpers'
 import { buildMerchantSoftware, formatPhoneForJPMC } from './helpers/request-helpers'
+
 /**
  * Build complete merchant object from config
  * Includes merchantSoftware and optionally merchantCategoryCode
  * 
  * @param {object} _config - JPMC config with merchant* properties
  */
-const buildMerchant = (_config = {}) => {
-    return {
-        merchantSoftware: buildMerchantSoftware()
+const buildMerchant = (_config = {}, isPreventSoftwareId = false) => {
+    const merchant = {
+        merchantSoftware: buildMerchantSoftware(isPreventSoftwareId)
     }
+    
+    return merchant
 }
 
 /**
@@ -124,7 +127,7 @@ const buildGooglePayRequestBodyInternal = (paymentData, config = {}) => {
         throw new Error('amount is required for Google Pay payments')
     }
 
-    const amountMinorUnits = Math.round(Number.parseFloat(amount))
+    const amountInCents = Math.round(Number.parseFloat(amount))
 
     let parsedToken = googlePayToken
     if (typeof googlePayToken === 'string') {
@@ -161,7 +164,7 @@ const buildGooglePayRequestBodyInternal = (paymentData, config = {}) => {
 
     const body = {
         captureMethod,
-        amount: amountMinorUnits,
+        amount: amountInCents,
         currency,
         merchant: buildMerchant(config),
         initiatorType: INITIATOR_TYPE,
@@ -326,15 +329,14 @@ export const buildPaymentRequestBody = (paymentData, config = {}) => {
         clientIp,
         browserInfo,
         cardTypeName,
-        cardType,
-        locale
+        cardType
     } = paymentData
 
-    const amountMinorUnits = Math.round(Number.parseFloat(amount))
+    const amountInCents = Math.round(Number.parseFloat(amount))
 
     const body = {
         captureMethod,
-        amount: amountMinorUnits,
+        amount: amountInCents,
         currency,
         merchant: buildMerchant(config),
         initiatorType: INITIATOR_TYPE,
@@ -348,9 +350,8 @@ export const buildPaymentRequestBody = (paymentData, config = {}) => {
     
     if (should3DSBeBuilt(browserInfo, config, cardTypeName, cardType)) {
         const callbackMerchantId = config.merchantId || ''
-        const localeParam = locale ? `&locale=${encodeURIComponent(locale)}` : ''
         const returnUrl = config.threeDSReturnUrl || 
-            `${config.baseUrl || ''}/checkout/3ds-callback?orderNo=${merchantOrderNumber}&orderToken=${merchantOrderNumber}&merchantId=${callbackMerchantId}${localeParam}`
+            `${config.baseUrl || ''}/checkout/3ds-callback?orderNo=${merchantOrderNumber}&orderToken=${merchantOrderNumber}&merchantId=${callbackMerchantId}`
         
         threeDSAuthParams = build3DSAuthenticationParameters({
             resolvedConfig: config,
@@ -437,7 +438,7 @@ export const buildVerificationRequestBody = (data, usePlainCard = false, config 
     const { card, accountHolder, billingAddress, currency } = data
     
     const body = {
-        merchant: buildMerchant(config),
+        merchant: buildMerchant(config, true),
         currency,
         paymentMethodType: {
             card: usePlainCard ? {

@@ -34,6 +34,7 @@ export {
 export {
     translateGooglePayAddressToSFCC,
     translateSFCCShippingMethodToGooglePay,
+    buildDisplayItemsFromBasket,
     updateShippingAddress,
     getShippingMethods,
     setShippingMethod,

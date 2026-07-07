@@ -145,22 +145,8 @@ export function useThreeDS({
             if (data.responseStatus === THREE_DS.RESPONSE_STATUS.SUCCESS) {
                 onSuccess?.(data)
             } else if (data.responseStatus === THREE_DS.RESPONSE_STATUS.DENIED) {
-                if (fail3DSOrderFn && orderInfoRef.current) {
-                    fail3DSOrderFn(
-                        orderInfoRef.current.orderNo,
-                        orderInfoRef.current.orderToken,
-                        THREE_DS.FAILURE_REASON.DENIED
-                    )
-                }
                 onDenied?.(data)
             } else {
-                if (fail3DSOrderFn && orderInfoRef.current) {
-                    fail3DSOrderFn(
-                        orderInfoRef.current.orderNo,
-                        orderInfoRef.current.orderToken,
-                        THREE_DS.FAILURE_REASON.ERROR
-                    )
-                }
                 onError?.(data)
             }
         }

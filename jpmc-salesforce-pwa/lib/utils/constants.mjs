@@ -334,7 +334,7 @@ export const GOOGLE_PAY_BUTTON_CONFIG = {
         buttonType: 'buy',
         buttonColor: 'black',
         buttonSizeMode: 'fill',
-        buttonLocale: 'en'  // fallback only — override with runtime site locale at initialization
+        buttonLocale: 'en'
     }
 }
 
@@ -1040,9 +1040,7 @@ export const THREE_DS = {
     FAILURE_REASON: {
         TIMEOUT: 'TIMEOUT',
         USER_CANCELLED: 'USER_CANCELLED',
-        IFRAME_ERROR: 'IFRAME_ERROR',
-        DENIED: 'DENIED',
-        ERROR: 'ERROR'
+        IFRAME_ERROR: 'IFRAME_ERROR'
     },
 
     /**

@@ -76,8 +76,3 @@ export {
     parseExpiryDate,
     transformBillingAddress
 } from './form-transformer'
-
-// Localization label fetcher
-export {
-    getDisplayItemLabels
-} from './label-fetcher'
