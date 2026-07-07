@@ -13,6 +13,7 @@ import { extract3DSValues, build3DSOrderPatchPayload } from '../../services/api/
 import { THREE_DS } from '../../utils/constants.mjs'
 import logger, { safeStringify } from '../../utils/logger.js'
 import { getJPMCConfigAsync } from '../index.js'
+import { fromMinorUnits } from '../../utils/currency.js'
 
 /**
  * Cache to track processed callbacks and prevent duplicate processing.
@@ -24,20 +25,6 @@ import { getJPMCConfigAsync } from '../index.js'
 const callbackCache = new Map()
 
 const CALLBACK_CACHE_TTL_MS = 5 * 60 * 1000
-
-/**
- * Cleanup old cache entries periodically
- */
-function cleanupCallbackCache() {
-    const now = Date.now()
-    for (const [key, value] of callbackCache.entries()) {
-        if (now - value.timestamp > CALLBACK_CACHE_TTL_MS) {
-            callbackCache.delete(key)
-        }
-    }
-}
-
-setInterval(cleanupCallbackCache, 60 * 1000)
 
 export function clearCallbackCache() {
     callbackCache.clear()
@@ -75,7 +62,6 @@ export function configureThreeDSController(config) {
 function getAllowedOrigins() {
     const allowedOriginsEnv = process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS || ''
     if (!allowedOriginsEnv.trim()) {
-        logger.warn('[3DS Controller] JPMC_STOREFRONT_ALLOWED_ORIGINS not configured - postMessage will use "*" fallback')
         return new Set()
     }
     
@@ -90,18 +76,20 @@ function getAllowedOrigins() {
 /**
  * Validate and get safe target origin for postMessage
  * 
- * Security: Validates origin against allowlist before using in postMessage
+ * Security: Validates origin against allowlist before using in postMessage.
+ * Returns null if origin cannot be validated to enforce fail-closed behavior.
+ * The caller MUST check for null and handle appropriately.
  * 
  * @param {string} potentialOrigin - Origin derived from request headers
- * @returns {string} Safe origin for postMessage (validates against allowlist)
+ * @returns {string|null} Safe origin for postMessage, or null if validation fails
  */
 function getSafeTargetOrigin(potentialOrigin) {
     const allowedOrigins = getAllowedOrigins()
     
-    // If no allowlist is configured, log warning and use permissive "*"
+    // If no allowlist is configured, return null (fail-closed)
     if (allowedOrigins.size === 0) {
-        logger.warn('[3DS Controller] No allowed origins configured, using permissive "*" for postMessage')
-        return '*'
+        logger.error('[3DS Controller] JPMC_STOREFRONT_ALLOWED_ORIGINS not configured. 3DS callback postMessage is blocked.')
+        return null
     }
     
     // Check if the potential origin is in the allowlist
@@ -109,15 +97,14 @@ function getSafeTargetOrigin(potentialOrigin) {
         return potentialOrigin
     }
     
-    // Log security event - potential origin spoofing attempt
-    logger.error('[3DS Controller] Origin not in allowlist - postMessage will use "*" (restricted mode):', {
+    // Log security event - origin not in allowlist
+    logger.error('[3DS Controller] Origin not in allowlist, blocking postMessage:', {
         attemptedOrigin: potentialOrigin,
         allowedOrigins: Array.from(allowedOrigins)
     })
     
-    // Return "*" as fallback (less secure but prevents postMessage from being blocked)
-    // The parent window should use origin checking in its postMessage handler
-    return '*'
+    // Return null (fail-closed) - do not send postMessage with wildcard
+    return null
 }
 
 /**
@@ -189,7 +176,7 @@ function build3DSPostbackHtml(data, targetOrigin, nonce) {
  * @returns {{ valid: boolean, error?: string, orderNo?: string, orderToken?: string, paymentRequestId?: string, responseStatus?: string }}
  */
 function validateCallbackRequest(req) {
-    const { orderNo, orderToken, merchantId: queryMerchantId } = req.query
+    const { orderNo, orderToken, merchantId: queryMerchantId, locale } = req.query
     const { paymentRequestId, responseStatus } = req.body
 
     if (!orderNo || !orderToken) {
@@ -199,7 +186,7 @@ function validateCallbackRequest(req) {
         return { valid: false, error: 'Missing payment information', orderNo, orderToken }
     }
 
-    return { valid: true, orderNo, orderToken, paymentRequestId, responseStatus, queryMerchantId }
+    return { valid: true, orderNo, orderToken, paymentRequestId, responseStatus, queryMerchantId, locale }
 }
 
 /**
@@ -209,6 +196,11 @@ function validateCallbackRequest(req) {
 function checkDuplicateCallback(cacheKey, orderNo, orderToken, responseStatus, targetOrigin, nonce) {
     const cached = callbackCache.get(cacheKey)
     if (!cached) {
+        return { isDuplicate: false }
+    }
+
+    if (Date.now() - cached.timestamp > CALLBACK_CACHE_TTL_MS) {
+        callbackCache.delete(cacheKey)
         return { isDuplicate: false }
     }
 
@@ -238,10 +230,10 @@ function checkDuplicateCallback(cacheKey, orderNo, orderToken, responseStatus, t
 /**
  * Resolve JPMC config with merchantId override if needed
  */
-async function resolveJPMCConfig(queryMerchantId, orderNo) {
+async function resolveJPMCConfig(queryMerchantId, orderNo, locale) {
     let jpmcConfig = controllerConfig.jpmcConfig
     if (!jpmcConfig) {
-        jpmcConfig = await getJPMCConfigAsync()
+        jpmcConfig = await getJPMCConfigAsync(locale)
     }
     
     if (!jpmcConfig) {
@@ -310,15 +302,41 @@ function buildEmptyThreeDSValues() {
 /**
  * Update order and payment transaction after 3DS
  */
+/**
+ * Update order after 3DS authentication completes
+ * @param {string} orderNo - Order number
+ * @param {boolean} isSuccess - Whether 3DS authentication was successful
+ * @param {Object} paymentDetails - Payment details from JPMC
+ * @param {Object} threeDSValues - 3DS authentication values
+ */
 async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSValues) {
     const orderApi = new OrderApiClient()
-    const newStatus = isSuccess ? 'new' : 'failed'
-    await orderApi.updateOrderStatus(orderNo, newStatus)
-    // Get order and payment instrument FIRST — before any status change.
-    // The Orders Data API returns 403 for orders in 'failed' status,
-    // so all patches must happen while the order is still in its current state.
-    console.log('[3DS Controller] Fetching order for patching:', orderNo)
     const order = await orderApi.getOrder(orderNo)
+    
+    if (!isSuccess) {
+        // FAILED 3DS: Only change status to 'failed', no patches allowed
+        if (order.status !== 'failed') {
+            await orderApi.updateOrderStatus(orderNo, 'failed')
+            if (controllerConfig.debug) {
+                logger.info('[3DS Controller] Updated order status to failed:', { orderNo, oldStatus: order.status })
+            }
+        }
+        return // No patches for failed orders
+    }
+    
+    // SUCCESS 3DS: Change status to 'new' and apply patches
+    const newStatus = 'new'
+    
+    // STEP 1: Change order status to 'new' FIRST
+    // This MUST happen BEFORE any patches, as the order must be in 'new' status to be patchable
+    if (order.status !== newStatus) {
+        await orderApi.updateOrderStatus(orderNo, newStatus)
+        if (controllerConfig.debug) {
+            logger.info('[3DS Controller] Updated order status:', { orderNo, oldStatus: order.status, newStatus })
+        }
+    }
+    
+    // STEP 2: Get payment instrument for patching
     const paymentInstrument = order.paymentInstruments?.[0]
     const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
     
@@ -326,12 +344,12 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
         throw new Error('No paymentInstrumentId found - cannot patch PaymentTransaction')
     }
     
-    // Build payloads
+    // STEP 3: Build payloads for order and payment transaction patches
     const { paymentTransactionPayload, orderPayload } = buildOrderPatchPayloads(
-        paymentDetails, threeDSValues, isSuccess
+        paymentDetails, threeDSValues, isSuccess, order.currency
     )
     
-    // Patch payment transaction if needed
+    // STEP 4: Patch payment transaction if needed
     if (Object.keys(paymentTransactionPayload).length > 0) {
         if (controllerConfig.debug) {
             logger.info('[3DS Controller] Patching PaymentTransaction:', orderNo, paymentInstrumentId)
@@ -339,24 +357,19 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
         await orderApi.patchPaymentTransaction(orderNo, paymentInstrumentId, paymentTransactionPayload)
     }
     
-    // Patch order if needed
+    // STEP 5: Patch order if needed
     if (Object.keys(orderPayload).length > 0) {
         if (controllerConfig.debug) {
             logger.info('[3DS Controller] Patching Order:', orderNo)
         }
         await orderApi.patchOrder(orderNo, orderPayload)
     }
-
-    // Update order status LAST — after all patches are written,
-    // so the order remains accessible via the Orders Data API throughout.
-    
-    await orderApi.updateOrderStatus(orderNo, newStatus)
 }
 
 /**
  * Build payloads for order and payment transaction patches
  */
-function buildOrderPatchPayloads(paymentDetails, threeDSValues, isSuccess) {
+function buildOrderPatchPayloads(paymentDetails, threeDSValues, isSuccess, currency) {
     if (!paymentDetails?.success) {
         return {
             paymentTransactionPayload: {},
@@ -367,7 +380,7 @@ function buildOrderPatchPayloads(paymentDetails, threeDSValues, isSuccess) {
         }
     }
 
-    const paymentAmount = paymentDetails.amount ? paymentDetails.amount / 100 : 0
+    const paymentAmount = paymentDetails.amount ? fromMinorUnits(paymentDetails.amount, currency) : 0
     const captureMethod = paymentDetails.captureMethod || 'NOW'
     const authResult = paymentDetails.paymentAuthenticationResult || {}
     const threeDSCompletion = authResult.threeDomainSecureCompletion || {}
@@ -436,6 +449,7 @@ export async function handle3DSCallback(req, res) {
     // CSP nonce set by jpmorganCSPMiddleware — must be added to inline script/style tags
     const cspNonce = res.locals.cspNonce || null
     
+    // Set CSP frame-ancestors based on allowlist configuration
     const allowedOrigins = getAllowedOrigins()
     if (allowedOrigins.size > 0) {
         const frameAncestorsDirective = Array.from(allowedOrigins).join(' ')
@@ -445,9 +459,27 @@ export async function handle3DSCallback(req, res) {
             ? `${existingCsp}; frame-ancestors ${frameAncestorsDirective}`
             : `frame-ancestors ${frameAncestorsDirective}`
         res.setHeader('Content-Security-Policy', framAncestorsCSP)
+    } else {
+        // No allowlist configured: block embedding in any frame
+        const existingCsp = res.getHeader('Content-Security-Policy') || ''
+        const framAncestorsCSP = existingCsp 
+            ? `${existingCsp}; frame-ancestors 'none'`
+            : "frame-ancestors 'none'"
+        res.setHeader('Content-Security-Policy', framAncestorsCSP)
     }
 
     try {
+        // Step 0: Validate that targetOrigin was resolved (fail-closed if not)
+        if (!targetOrigin) {
+            logger.error('[3DS Controller] Cannot proceed: origin validation failed (allowlist not configured or origin not in allowlist)')
+            // Return error HTML without postMessage to parent (unsafe origin)
+            return res.status(403).send(build3DSPostbackHtml({
+                success: false,
+                responseStatus: THREE_DS.RESPONSE_STATUS.ERROR,
+                error: 'Origin validation failed - cannot deliver payment result'
+            }, 'about:blank', cspNonce))
+        }
+
         // Step 1: Validate request
         const validation = validateCallbackRequest(req)
         if (!validation.valid) {
@@ -461,10 +493,10 @@ export async function handle3DSCallback(req, res) {
             }, targetOrigin, cspNonce))
         }
 
-        const { orderNo, orderToken, paymentRequestId, responseStatus, queryMerchantId } = validation
+        const { orderNo, orderToken, paymentRequestId, responseStatus, queryMerchantId, locale } = validation
         
         if (controllerConfig.debug) {
-            logger.info('[3DS Controller] Query params:', { orderNo, orderToken, queryMerchantId })
+            logger.info('[3DS Controller] Query params:', { orderNo, orderToken, queryMerchantId, locale })
             logger.info('[3DS Controller] Body:', { paymentRequestId, responseStatus })
         }
 
@@ -484,7 +516,7 @@ export async function handle3DSCallback(req, res) {
         let threeDSValues = buildEmptyThreeDSValues()
         
         try {
-            const jpmcConfig = await resolveJPMCConfig(queryMerchantId, orderNo)
+            const jpmcConfig = await resolveJPMCConfig(queryMerchantId, orderNo, locale)
             const result = await fetch3DSPaymentDetails(jpmcConfig, paymentRequestId)
             paymentDetails = result.paymentDetails
             threeDSValues = result.threeDSValues
@@ -528,11 +560,48 @@ export async function handle3DSCallback(req, res) {
         } catch (_e) { /* ignore */ }
         
         res.setHeader('Content-Type', 'text/html')
+        // Use safe fallback origin in error case (targetOrigin validated in Step 0)
+        const safeOrigin = targetOrigin || 'about:blank'
         return res.status(500).send(build3DSPostbackHtml({
             success: false,
             responseStatus: THREE_DS.RESPONSE_STATUS.ERROR,
             error: 'An unexpected error occurred'
-        }, targetOrigin, cspNonce))
+        }, safeOrigin, cspNonce))
+    }
+}
+
+/**
+ * Attempt to reopen basket via SCAPI
+ */
+async function attemptReopenBasketViaSCAPI(orderNo, token, commerceConfig) {
+    if (!token || !commerceConfig?.proxy || !commerceConfig?.organizationId || !commerceConfig?.siteId) {
+        return { basketReopened: false, basketId: null }
+    }
+
+    try {
+        const { proxy, organizationId, siteId } = commerceConfig
+        const url = `${proxy}/checkout/shopper-orders/v1/organizations/${organizationId}/orders/${orderNo}/actions/fail?siteId=${siteId}&reopenBasket=true`
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ reasonCode: 'payment_auth_failure' })
+        })
+
+        if (!response.ok) {
+            return { basketReopened: false, basketId: null }
+        }
+
+        const locationHeader = response.headers.get('Location')
+        const basketMatch = locationHeader?.match(/\/baskets\/([^/?]+)/)
+        const basketId = basketMatch?.[1]
+
+        return { basketReopened: !!basketId, basketId }
+    } catch (error) {
+        return { basketReopened: false, basketId: null }
     }
 }
 
@@ -540,14 +609,25 @@ export async function handle3DSCallback(req, res) {
  * Handle Fail 3DS Order
  * 
  * Called when user cancels or times out during 3DS authentication.
- * Marks the order as failed and stores the failure reason.
+ * 1. Marks the order as failed and stores the failure reason
+ * 2. Attempts to reopen the customer's basket via SCAPI (if token and config provided)
  * 
  * @param {Object} req - Express request
+ * @param {Object} req.body.orderNo - Order number
+ * @param {Object} req.body.orderToken - Order token (for validation)
+ * @param {Object} req.body.failureReason - Failure reason code
+ * @param {Object} req.body.commerceConfig - Optional commerce-sdk-react config { proxy, organizationId, siteId }
+ * @param {Object} req.headers.authorization - Bearer token for SCAPI calls
  * @param {Object} res - Express response
  */
 export async function handleFail3DSOrder(req, res) {
     try {
-        const { orderNo, orderToken, failureReason: reasonInput } = req.body
+        const { 
+            orderNo, 
+            orderToken, 
+            failureReason: reasonInput,
+            commerceConfig
+        } = req.body
 
         if (!orderNo || !orderToken) {
             return res.status(400).json({
@@ -559,7 +639,9 @@ export async function handleFail3DSOrder(req, res) {
         const allowedReasons = [
             THREE_DS.FAILURE_REASON.TIMEOUT,
             THREE_DS.FAILURE_REASON.USER_CANCELLED,
-            THREE_DS.FAILURE_REASON.IFRAME_ERROR
+            THREE_DS.FAILURE_REASON.IFRAME_ERROR,
+            THREE_DS.FAILURE_REASON.DENIED,
+            THREE_DS.FAILURE_REASON.ERROR
         ]
         const failureReason = allowedReasons.includes(reasonInput) 
             ? reasonInput 
@@ -576,6 +658,7 @@ export async function handleFail3DSOrder(req, res) {
             })
         }
 
+        // Step 1: Mark order as failed in SFCC
         await orderApi.patchOrder(orderNo, {
             c_pending3DSAuthentication: false,
             c_threeDSTransactionStatus: THREE_DS.TRANSACTION_STATUS.UNAVAILABLE,
@@ -584,7 +667,24 @@ export async function handleFail3DSOrder(req, res) {
 
         await orderApi.updateOrderStatus(orderNo, 'failed')
 
-        return res.json({ success: true })
+        // Step 2: Attempt to reopen basket via SCAPI (optional, best-effort)
+        let basketReopenResult = { basketReopened: false, basketId: null }
+        const authHeader = req.headers.authorization
+        if (authHeader && commerceConfig) {
+            const token = authHeader.replace('Bearer ', '')
+            basketReopenResult = await attemptReopenBasketViaSCAPI(orderNo, token, commerceConfig)
+        } else {
+            logger.debug('[3DS Controller] Skipping basket reopen: missing auth header or commerceConfig', {
+                hasAuth: !!authHeader,
+                hasConfig: !!commerceConfig
+            })
+        }
+
+        return res.json({
+            success: true,
+            basketReopened: basketReopenResult.basketReopened,
+            basketId: basketReopenResult.basketId
+        })
 
     } catch (error) {
         logger.error('[3DS Controller] Fail 3DS Order error:', error.message)

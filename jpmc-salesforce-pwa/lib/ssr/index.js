@@ -18,7 +18,7 @@
  * @module @jpmorgan/jpmorgan-salesforce-pwa/ssr
  */
 
-import { registerJPMCRoutes, registerJPMCEndpoints } from './routes'
+import { registerJPMCEndpoints } from './routes'
 import { jpmorganCSPMiddleware } from './middleware/csp'
 import { jpmorganErrorHandler } from './middleware/error-handler'
 import bodyParser from 'body-parser'
@@ -177,6 +177,15 @@ export const getJPMCConfigAsync = async (options = {}) => {
         useSitePreferences = DEFAULT_CONFIG.useSitePreferences 
     } = options
 
+    // Log input parameters for debugging
+    logger.info('[JPMC Config] getJPMCConfigAsync called with:', {
+        locale: locale || 'NOT_PROVIDED',
+        hasSlasToken: !!slasToken,
+        slasTokenLength: slasToken ? slasToken.length : 0,
+        forceRefresh,
+        useSitePreferences
+    })
+
     // Check resolved config cache first (unless forceRefresh)
     const cacheKey = `${locale || 'default'}`
     if (!forceRefresh) {
@@ -186,7 +195,9 @@ export const getJPMCConfigAsync = async (options = {}) => {
         }
     }
 
-    // Helper to cache and return config
+    // Helper to cache and return config.
+    // Config is sourced exclusively from BM (Site Preferences or Custom Objects)
+    // merged with environment variables for sensitive credentials.
     const cacheAndReturn = (config) => {
         resolvedConfigCache.set(cacheKey, { config, timestamp: Date.now() })
         return config
@@ -225,6 +236,11 @@ export const getJPMCConfigAsync = async (options = {}) => {
     if (!isMultiMerchantEnabled) {
         // Multi-Merchant disabled → Return Site Preferences only (no CO lookup)
         spConfig._configSource = 'sitePreferences'
+        logger.info('[JPMC Config] Multi-Merchant disabled. Using Site Preferences.', {
+            locale,
+            checkoutMode: spConfig.checkoutMode,
+            dropInEnabled: spConfig.checkoutMode === 'DROP_IN'
+        })
         return cacheAndReturn(spConfig)
     }
 
@@ -233,6 +249,14 @@ export const getJPMCConfigAsync = async (options = {}) => {
     // =========================================================================
     // Need SLAS token for CO lookup
     if (!slasToken) {
+        logger.warn('[JPMC Config] Multi-Merchant enabled BUT no SLAS token provided.', {
+            locale,
+            multiMerchantEnabled: true,
+            reason: 'SLAS token is required for custom object lookup but was not provided by client',
+            fallback: 'Using Site Preferences instead. This will apply the same config to all locales.',
+            checkoutMode: spConfig.checkoutMode,
+            note: 'If you want per-locale configuration, ensure the client is sending the Authorization header with SLAS token.'
+        })
         spConfig._configSource = 'sitePreferences'
         spConfig._multiMerchantEnabled = true
         return cacheAndReturn(spConfig)
@@ -267,7 +291,28 @@ export const getJPMCConfigAsync = async (options = {}) => {
                 
                 finalConfig._configSource = 'customObject'
                 finalConfig._locale = locale
+                logger.info('[JPMC Config] ✅ Locale-specific Custom Object found and applied.', {
+                    locale,
+                    checkoutMode: finalConfig.checkoutMode,
+                    dropInEnabled: finalConfig.checkoutMode === 'DROP_IN',
+                    source: 'customObject',
+                    note: 'Custom object is overriding Site Preferences'
+                })
                 return cacheAndReturn(finalConfig)
+            } else if (localeCoConfig) {
+                // Found but disabled
+                logger.info('[JPMC Config] ⚠️  Locale-specific Custom Object found but DISABLED.', {
+                    locale,
+                    reason: 'Custom object has enabled=false',
+                    fallback: 'Falling back to Site Preferences'
+                })
+            } else {
+                // Not found (404)
+                logger.info('[JPMC Config] ⚠️  Locale-specific Custom Object not found.', {
+                    locale,
+                    expectedKeyFormat: '{siteId}::' + locale,
+                    fallback: 'Falling back to default Custom Object or Site Preferences'
+                })
             }
         }
 
@@ -287,8 +332,27 @@ export const getJPMCConfigAsync = async (options = {}) => {
             
             finalConfig._configSource = 'customObject'
             finalConfig._locale = 'default'
+            logger.info('[JPMC Config] ✅ Default Custom Object found and applied.', {
+                locale: locale || 'not specified',
+                checkoutMode: finalConfig.checkoutMode,
+                dropInEnabled: finalConfig.checkoutMode === 'DROP_IN',
+                source: 'customObject (default)',
+                note: 'Locale-specific CO not found, using default CO which overrides Site Preferences'
+            })
             if (locale) finalConfig._requestedLocale = locale
             return cacheAndReturn(finalConfig)
+        } else if (defaultCoConfig) {
+            // Default CO found but disabled
+            logger.info('[JPMC Config] ⚠️  Default Custom Object found but DISABLED.', {
+                reason: 'Custom object has enabled=false',
+                fallback: 'Falling back to Site Preferences'
+            })
+        } else {
+            // Default CO not found
+            logger.info('[JPMC Config] ⚠️  Default Custom Object not found.', {
+                expectedKey: `${siteId}::default`,
+                fallback: 'Falling back to Site Preferences'
+            })
         }
 
     } catch (error) {
@@ -299,10 +363,25 @@ export const getJPMCConfigAsync = async (options = {}) => {
     // =========================================================================
     // STEP 4: Fallback to Site Preferences
     // =========================================================================
+    logger.info('[JPMC Config] ℹ️  No valid custom object found, using Site Preferences.', {
+        locale: locale || 'not specified',
+        multiMerchantEnabled: true,
+        checkoutMode: spConfig.checkoutMode,
+        dropInEnabled: spConfig.checkoutMode === 'DROP_IN',
+        source: 'sitePreferences (fallback)'
+    })
     spConfig._configSource = 'sitePreferences'
     spConfig._multiMerchantEnabled = true
     spConfig._fallback = true
     if (locale) spConfig._requestedLocale = locale
+    
+    logger.info('[JPMC Config] Using Site Preferences (no custom object found for locale or custom object lookup failed).', {
+        locale,
+        multiMerchantEnabled: true,
+        checkoutMode: spConfig.checkoutMode,
+        dropInEnabled: spConfig.checkoutMode === 'DROP_IN',
+        message: 'This is expected if custom object is not configured for this locale. Drop-in will appear if JPMCCheckoutMode preference = DROP_IN globally in BM.'
+    })
     
     return cacheAndReturn(spConfig)
 }
@@ -313,6 +392,29 @@ export const getJPMCConfigAsync = async (options = {}) => {
  * Validates that sensitive credentials are available from environment.
  * Non-sensitive config is validated when fetched from BM site preferences.
  * 
+/**
+ * Validate JPMC configuration at boot time
+ * Throws error if required configuration is missing
+ * @throws {Error} If required environment variables are missing
+ */
+const validateRequiredConfig = () => {
+    const config = getJPMCConfig()
+    const errors = []
+    
+    if (!config.privateKeyBase64 && !config.privateKeyPath) {
+        errors.push('JPMC_PRIVATE_KEY_BASE64 or JPMC_PRIVATE_KEY_PATH is required')
+    }
+    
+    if (!config.certificateBase64 && !config.certificatePath) {
+        errors.push('JPMC_CERTIFICATE_BASE64 or JPMC_CERTIFICATE_PATH is required')
+    }
+    
+    if (errors.length > 0) {
+        throw new Error(`[JPMC] Missing required configuration: ${errors.join('; ')}`)
+    }
+}
+
+/**
  * @param {Object} fullConfig - Optional full config from getJPMCConfigAsync()
  * @returns {object} { valid: boolean, errors: string[] }
  */
@@ -386,20 +488,15 @@ export const validateConfig = async () => {
  * ```
  */
 export function createJPMCHandler(runtime, options, appCallback, jpmcOptions = {}) {
+    // Validate required configuration immediately (fail-fast)
+    validateRequiredConfig()
+    
     // Merge options with defaults
     const config = { ...DEFAULT_CONFIG, ...jpmcOptions }
     
-    // Validate configuration
-    const validation = validateConfig()
-    if (!validation.valid) {
-        logger.warn('[JPMC] Configuration warnings:', validation.errors)
-    }
-    
     if (config.debug) {
         logger.info('[JPMC] Creating handler with config:', {
-            apiBasePath: config.apiBasePath,
-            merchantId: validation.config.merchantId ? '***' + validation.config.merchantId.slice(-4) : 'NOT SET',
-            hasPieUrls: !!(validation.config.pieEncryptionUrl && validation.config.pieGetKeyUrl)
+            apiBasePath: config.apiBasePath
         })
     }
     
@@ -413,9 +510,9 @@ export function createJPMCHandler(runtime, options, appCallback, jpmcOptions = {
         app.use(cspMiddleware)
         
         // 3. Register JPMC API routes
-        registerJPMCRoutes(app, {
-            basePath: config.apiBasePath,
-            enableVerification: config.enableVerification,
+        registerJPMCEndpoints(app, runtime, {
+            attributeMapping: {},
+            commerceConfig: config,
             debug: config.debug
         })
         
@@ -435,7 +532,7 @@ export function createJPMCHandler(runtime, options, appCallback, jpmcOptions = {
 // Exports
 // =============================================================================
 
-export { registerJPMCRoutes, registerJPMCEndpoints, SuccessHandler, ErrorHandler, configureThreeDSController } from './routes'
+export { registerJPMCEndpoints, SuccessHandler, ErrorHandler, configureThreeDSController } from './routes'
 export { jpmorganCSPMiddleware, mergeCSPDirectives } from './middleware/csp'
 export { jpmorganErrorHandler } from './middleware/error-handler'
 export { 

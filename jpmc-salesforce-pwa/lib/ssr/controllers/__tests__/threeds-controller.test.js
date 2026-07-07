@@ -42,7 +42,8 @@ jest.mock('../../../utils/logger.js', () => ({
     default: {
         info: jest.fn(),
         warn: jest.fn(),
-        error: jest.fn()
+        error: jest.fn(),
+        debug: jest.fn()
     },
     safeStringify: jest.fn(obj => JSON.stringify(obj))
 }))
@@ -74,11 +75,17 @@ const createMockReqRes = (overrides = {}) => {
         }
     }
     
+    // Mock response with header tracking
+    const headers = {}
     const res = {
         status: jest.fn().mockReturnThis(),
         json: jest.fn().mockReturnThis(),
         send: jest.fn().mockReturnThis(),
-        setHeader: jest.fn().mockReturnThis(),
+        setHeader: jest.fn((key, value) => {
+            headers[key] = value
+            return res
+        }),
+        getHeader: jest.fn((key) => headers[key]),
         locals: { cspNonce: 'test-nonce' },
         ...overrides.res
     }
@@ -90,6 +97,9 @@ describe('threeds-controller', () => {
     beforeEach(() => {
         jest.clearAllMocks()
         clearCallbackCache()
+        
+        // Set allowed origins for security validation (SEC-1 fix)
+        process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS = 'https://localhost:3000,https://storefront.example.com'
         
         // Configure controller with default settings
         configureThreeDSController({
@@ -125,6 +135,11 @@ describe('threeds-controller', () => {
                 }
             }
         })
+    })
+
+    afterEach(() => {
+        // Clean up environment variable
+        delete process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS
     })
 
     // =========================================================================
@@ -611,6 +626,124 @@ describe('threeds-controller', () => {
                 })
             })
         })
+
+        describe('Origin Validation (SEC-1 Security Fix)', () => {
+            it('should reject callback when JPMC_STOREFRONT_ALLOWED_ORIGINS is not configured', async () => {
+                // Clear the allowed origins config
+                delete process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS
+                
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                // Should return 403 Forbidden
+                expect(res.status).toHaveBeenCalledWith(403)
+                expect(res.send).toHaveBeenCalled()
+                
+                // Should NOT proceed to payment details fetch
+                expect(getPaymentDetails).not.toHaveBeenCalled()
+            })
+
+            it('should reject callback when origin is not in allowlist', async () => {
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        },
+                        headers: {
+                            'x-forwarded-proto': 'https',
+                            'x-forwarded-host': 'evil.attacker.com'
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                // Should return 403 Forbidden
+                expect(res.status).toHaveBeenCalledWith(403)
+                expect(res.send).toHaveBeenCalled()
+                
+                // Should NOT proceed to payment details fetch
+                expect(getPaymentDetails).not.toHaveBeenCalled()
+            })
+
+            it('should set CSP frame-ancestors to none when allowlist is not configured', async () => {
+                // Clear the allowed origins config
+                delete process.env.JPMC_STOREFRONT_ALLOWED_ORIGINS
+                
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                // Should set CSP with frame-ancestors 'none'
+                expect(res.setHeader).toHaveBeenCalledWith(
+                    'Content-Security-Policy',
+                    expect.stringContaining("frame-ancestors 'none'")
+                )
+            })
+
+            it('should set CSP frame-ancestors to allowed origins when configured', async () => {
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                // Should set CSP with frame-ancestors containing allowed origins
+                expect(res.setHeader).toHaveBeenCalledWith(
+                    'Content-Security-Policy',
+                    expect.stringContaining('frame-ancestors https://localhost:3000')
+                )
+            })
+
+            it('should allow callback from origin in allowlist', async () => {
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        },
+                        headers: {
+                            'x-forwarded-proto': 'https',
+                            'x-forwarded-host': 'localhost:3000'
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                // Should proceed normally (not 403)
+                expect(res.status).not.toHaveBeenCalledWith(403)
+                
+                // Should proceed to payment details fetch
+                expect(getPaymentDetails).toHaveBeenCalled()
+            })
+        })
     })
 
     // =========================================================================
@@ -639,7 +772,7 @@ describe('threeds-controller', () => {
                     c_threeDSFailureReason: THREE_DS.FAILURE_REASON.USER_CANCELLED
                 })
                 expect(mockUpdateOrderStatus).toHaveBeenCalledWith('ORDER123', 'failed')
-                expect(res.json).toHaveBeenCalledWith({ success: true })
+                expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }))
             })
 
             it('should fail order on timeout', async () => {

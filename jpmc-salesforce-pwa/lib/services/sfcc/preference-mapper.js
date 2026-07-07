@@ -79,7 +79,16 @@ const PREFERENCE_MAPPING = {
     JPMCApplePaySupportedNetworks: 'applePaySupportedNetworks',
     JPMCApplePayMerchantCapabilities: 'applePayMerchantCapabilities',
 
-    jpmc3DSEnabled: 'jpmc3DSEnabled'
+    // 3D Secure Configuration
+    jpmc3DSEnabled: 'jpmc3DSEnabled',
+
+    // Drop-in UI Configuration
+    JPMCCheckoutMode: 'checkoutMode',
+    JPMCDropInScriptUrl: 'dropInScriptUrl',
+    JPMCDropInIntentUrl: 'checkoutIntentUrl',
+    JPMCDropInThemeOverrides: 'dropInThemeOverrides',
+    JPMCSaveConsumerProfile: 'saveConsumerProfile',
+    JPMCDropInControlledSubmit: 'dropInControlledSubmit'
 }
 
 /**
@@ -119,6 +128,16 @@ export const buildJPMCConfigFromPreferences = (preferences) => {
             config[configKey] = preferences[prefId]
         }
     }
+
+    // Log drop-in configuration
+    logger.info('[Preference Mapper] Drop-in UI Configuration:', {
+        checkoutMode: config.checkoutMode || 'NOT_SET',
+        isDropInEnabled: config.checkoutMode === 'DROP_IN',
+        dropInScriptUrl: config.dropInScriptUrl || 'NOT_SET',
+        dropInThemeOverrides: config.dropInThemeOverrides ? 'Configured' : 'NOT_SET',
+        saveConsumerProfile: config.saveConsumerProfile !== undefined ? config.saveConsumerProfile : 'NOT_SET',
+        dropInControlledSubmit: config.dropInControlledSubmit !== undefined ? config.dropInControlledSubmit : 'NOT_SET'
+    })
 
     // NO defaults applied - all values must come from BM
     // Log warning for any values that were previously defaulted but are now missing

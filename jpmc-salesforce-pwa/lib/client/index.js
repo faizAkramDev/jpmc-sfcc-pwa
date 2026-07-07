@@ -154,6 +154,42 @@ export {
     checkAvailablePaymentMethods 
 } from '../hooks/useAvailablePaymentMethods'
 
+/**
+ * Hook for Drop-in payment success flow
+ * 
+ * Encapsulates the complete order flow after Drop-in SDK PaymentSuccess fires:
+ * 1. Set billing address to basket
+ * 2. Attach payment instrument to basket
+ * 3. Create SFCC order
+ * 4. Normalize Drop-in payload and confirm order server-side
+ * 5. Call success callback (e.g., navigate to confirmation)
+ * 
+ * This hook extracts the reusable business logic so integrators don't need
+ * to duplicate the 100+ line payment flow in every app.
+ * 
+ * Usage:
+ * ```jsx
+ * import { useDropInPaymentSuccess } from '@jpmorgan/jpmorgan-salesforce-pwa/lib/client'
+ * import { DropInCheckout } from '@jpmorgan/jpmorgan-salesforce-pwa/lib/client'
+ * 
+ * const CheckoutPayment = () => {
+ *   const { mutate: createOrder } = useCreateOrder()
+ *   const navigate = useNavigation()
+ *   
+ *   const { handlePaymentSuccess, isProcessing, error } = useDropInPaymentSuccess({
+ *     createOrderFn: createOrder,
+ *     onSuccess: (orderNo) => navigate(`/checkout/confirmation/${orderNo}`),
+ *     onError: (errorMsg) => setErrorMessage(errorMsg)
+ *   })
+ *   
+ *   return <DropInCheckout onPaymentSuccess={handlePaymentSuccess} />
+ * }
+ * ```
+ */
+export { useDropInPaymentSuccess } from '../hooks/useDropInPaymentSuccess'
+
+export { useServerSideCreateOrder } from '../hooks/useServerSideCreateOrder'
+
 // =============================================================================
 // GOOGLE PAY COMPONENTS
 // =============================================================================
@@ -218,6 +254,26 @@ export { GooglePayButton } from './components'
 export { ApplePayButton } from './components'
 
 // =============================================================================
+// DROP-IN UI COMPONENT
+// =============================================================================
+
+/**
+ * Drop-in Checkout Component
+ *
+ * Renders the JPMC hosted Drop-in UI widget for EU / alternate payment flows.
+ * Requires JPMCCheckoutProvider with dropInEnabled: true in the resolved config.
+ *
+ * Usage:
+ * ```jsx
+ * import { DropInCheckout } from '@jpmorgan/jpmorgan-salesforce-pwa/lib/client'
+ *
+ * // Inside checkout payment step (when isDropInEnabled === true):
+ * <DropInCheckout />
+ * ```
+ */
+export { DropInCheckout } from './components/DropInCheckout'
+
+// =============================================================================
 // 3DS COMPONENTS
 // =============================================================================
 
@@ -269,6 +325,25 @@ export { ThreeDSModal } from './components'
  * ```
  */
 export { transformPWAKitFormData, mapPWAKitCardType } from '../utils/form-transformer'
+
+// =============================================================================
+// LOCALIZATION & DISPLAY LABELS
+// =============================================================================
+
+/**
+ * Display Item Labels for Apple Pay & Google Pay
+ * 
+ * Provides localized labels for payment display items (shipping, tax, total).
+ * 
+ * Usage:
+ * ```jsx
+ * import { getDisplayItemLabels } from '@jpmorgan/jpmorgan-salesforce-pwa/client'
+ * 
+ * const labels = getDisplayItemLabels(intl)
+ * // Returns: { shipping: 'Shipping', tax: 'Tax', total: 'Total' }
+ * ```
+ */
+export { getDisplayItemLabels } from '../utils/label-fetcher'
 
 // =============================================================================
 // PAYMENT ERROR HANDLING & REDIRECT

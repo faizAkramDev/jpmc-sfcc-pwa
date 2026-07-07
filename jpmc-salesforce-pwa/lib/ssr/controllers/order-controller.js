@@ -8,9 +8,10 @@
  */
 
 import { OrderApiClient } from '../api/order-api'
-import { mapJPMCResponseToAttributes, mapPaymentTransactionAttributes, mapFraudResponseToOrderAttributes } from '../api/attribute-mapping'
+import { mapJPMCResponseToAttributes, mapPaymentTransactionAttributes } from '../api/attribute-mapping'
 import logger, { safeStringify } from '../../utils/logger.js'
 import { validateOrderNumber } from '../../utils/validation/input-validation'
+import { extractSlasToken } from '../../utils/locale-extractor.js'
 
 /**
  * Controller context - stores configuration
@@ -27,6 +28,60 @@ let controllerConfig = {
  * Configure the order controller
  * Called by registerJPMCEndpoints
  */
+/**
+ * POST /api/jpmorgan/order/create
+ * Creates an SFCC order from a basket using the shopper's SLAS token.
+ * Returns only { orderNo } — full order response is not forwarded to the client.
+ */
+export async function handleCreateOrder(req, res, next) {
+    try {
+        const { basketId } = req.body
+        if (!basketId) {
+            return res.status(400).json({ success: false, error: 'basketId is required' })
+        }
+
+        const slasToken = extractSlasToken(req)
+        if (!slasToken) {
+            return res.status(401).json({ success: false, error: 'Authorization required' })
+        }
+
+        const shortCode = controllerConfig.commerceConfig?.shortCode || process.env.COMMERCE_API_SHORT_CODE
+        const orgId = controllerConfig.commerceConfig?.orgId || process.env.COMMERCE_API_ORG_ID
+        const siteId = controllerConfig.commerceConfig?.siteId || process.env.COMMERCE_API_SITE_ID
+
+        const url = `https://${shortCode}.api.commercecloud.salesforce.com/checkout/shopper-orders/v1/organizations/${orgId}/orders?siteId=${siteId}`
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${slasToken}`
+            },
+            body: JSON.stringify({ basketId })
+        })
+
+        if (!response.ok) {
+            const error = await response.text()
+            logger.error('[OrderController] Create order failed:', response.status, error)
+            throw new Error(`Create order failed: ${response.status}`)
+        }
+
+        const order = await response.json()
+
+        logger.info('[OrderController] Order created', { orderNo: order.orderNo })
+
+        res.locals.response = {
+            orderNo: order.orderNo,
+            orderTotal: order.orderTotal,
+            paymentInstruments: order.paymentInstruments
+        }
+        return next()
+    } catch (error) {
+        logger.error('[OrderController] Create order error:', error)
+        return next(error)
+    }
+}
+
 export function configureOrderController(config) {
     controllerConfig = { ...controllerConfig, ...config }
 }
@@ -123,38 +178,48 @@ const callSuccessHandler = async (orderNo, jpmcResponse, req) => {
  * This endpoint is called after successful payment authorization
  * to store JPMC transaction data on the payment instrument.
  * 
- * NOTE: This only patches custom attributes. Status updates (paid, confirmed, etc.)
- * should be handled based on captureMethod:
- * - captureMethod: NOW → Payment already captured, status can be updated
- * - captureMethod: MANUAL → Auth only, capture happens later (BM module or webhook)
+ * Flow:
+ * 1. Update order status to 'new'
+ * 2. Patch payment instrument and transaction with JPMC data
+ * 3. Hold order (Drop-in only) until JPMC confirms payment server-to-server
+ * 4. Call custom success handler
  * 
- * For now, we only store the transaction data. Status updates can be added
- * when capture logic is implemented.
+ * The payment and export hold mechanism:
+ * - DROP-IN ONLY: Drop-in payment confirmation arrives asynchronously via server-to-server notification.
+ *   The hold prevents warehouse fulfillment until JPMC confirms payment via the notifications job.
+ * - PIE / Google Pay / Apple Pay: payment is confirmed synchronously in the same authorize request,
+ *   so no hold is needed for those flows.
+ * - jpmcCheckoutMode='DROP_IN' in jpmcResponse (set by useDropInPaymentSuccess) is the discriminator.
  */
 export async function handleConfirmOrder(req, res, next) {
     try {
         const { orderNo } = req.params
-        const { jpmcResponse, paymentInstrumentId, fraudResponse, kountSessionId, paymentAmount, captureMethod } = req.body
+        const { jpmcResponse, paymentInstrumentId, paymentAmount, captureMethod } = req.body
 
         if (!validateOrderOrRespond(orderNo, res)) return
 
+        // Drop-in orders carry jpmcCheckoutMode='DROP_IN' in the jpmcResponse payload
+        // (set by useDropInPaymentSuccess before calling confirmOrderServerSide).
+        // PIE / Google Pay / Apple Pay flows do not set this field.
+        const isDropIn = jpmcResponse?.jpmcCheckoutMode === 'DROP_IN'
+
         const orderApi = new OrderApiClient({ ...controllerConfig.commerceConfig, debug: controllerConfig.debug })
         // Step 1: Update order status to 'new'
-        const result = await updateOrderStatusToNew(orderApi, orderNo)
+        // This is critical for 3DS flows where transactionId may be 'PENDING_3DS' placeholder.
+        // The order must be in 'new' status so that the 3DS callback can GET the order and patch it later.
+        // SFCC Orders API returns 403 for GET operations on 'created' orders.
+        // For 3DS deferred: transactionId = 'PENDING_3DS' (placeholder for notifications job)
+        // For 3DS complete: transactionId = actual value from JPMC
+        // For non-3DS: transactionId = actual authorization ID from JPMC
+        await updateOrderStatusToNew(orderApi, orderNo)
 
-        // Step 2: Patch order with fraud check attributes (if fraud check was performed)
-        let orderFraudPatchResult = null
-        if (fraudResponse) {
-            try {
-                const fraudAttributes = mapFraudResponseToOrderAttributes(fraudResponse, kountSessionId)
-                await orderApi.patchOrder(orderNo, fraudAttributes)
-                orderFraudPatchResult = { success: true }
-            } catch (err) {
-                logger.warn('[OrderController] Order fraud attribute patch failed:', err.message)
-            }
-        }
-
-        // Step 3: Patch payment instrument and transaction
+        // Step 2: Patch payment instrument and transaction
+        // Payment instrument may have transactionId = 'PENDING_3DS' placeholder for 3DS deferred cases.
+        // The placeholder allows notification job to find order and update it when real transactionId arrives.
+        // For non-3DS or complete 3DS auth, transactionId is the actual JPMC transaction ID.
+        // NOTE: PENDING_3DS placeholder is DROP-IN SPECIFIC. Other payment methods (if added in future) 
+        //       will have actual transaction IDs and will patch normally without this placeholder logic.
+        //       This code is agnostic to the placeholder - it just patches whatever is in jpmcResponse.
         let paymentInstrumentPatchResult = null
         let paymentTransactionPatchResult = null
         
@@ -170,6 +235,30 @@ export async function handleConfirmOrder(req, res, next) {
             logger.warn('[OrderController] Cannot patch - paymentInstrumentId is required')
         }
 
+        // Step 3: Hold order (Drop-in only) until JPMC confirms payment server-to-server.
+        // Drop-in confirmation arrives asynchronously via the notifications job, so we hold the order
+        // to prevent warehouse fulfillment on an unconfirmed payment.
+        // PIE / Google Pay / Apple Pay payments are confirmed synchronously — no hold needed.
+        let paymentHoldResult = null
+        let exportHoldResult = null
+        if (isDropIn) {
+            try {
+                await orderApi.updateOrderPaymentStatus(orderNo, 'not_paid')
+                paymentHoldResult = { success: true }
+                logger.info('[OrderController] Order payment hold set for drop-in order:', orderNo)
+            } catch (err) {
+                logger.warn('[OrderController] Failed to set payment hold:', err.message)
+            }
+
+            try {
+                await orderApi.updateOrderExportStatus(orderNo, 'not_exported')
+                exportHoldResult = { success: true }
+                logger.info('[OrderController] Order export hold set for drop-in order:', orderNo)
+            } catch (err) {
+                logger.warn('[OrderController] Failed to set export hold:', err.message)
+            }
+        }
+
         await callSuccessHandler(orderNo, jpmcResponse, req)
 
         res.locals.response = {
@@ -177,9 +266,10 @@ export async function handleConfirmOrder(req, res, next) {
             orderNo,
             message: 'JPMC transaction data stored successfully',
             patchResults: {
-                order: orderFraudPatchResult,
                 paymentInstrument: paymentInstrumentPatchResult ? { success: true } : null,
-                paymentTransaction: paymentTransactionPatchResult ? { success: true } : null
+                paymentTransaction: paymentTransactionPatchResult ? { success: true } : null,
+                paymentHold: paymentHoldResult,
+                exportHold: exportHoldResult
             }
         }
         

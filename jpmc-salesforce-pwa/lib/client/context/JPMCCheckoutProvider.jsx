@@ -215,13 +215,18 @@ function extractGooglePayCallbackData(paymentData, options) {
         return { success: false, step: 'validation', error: 'Amount is required for callback flow - pass options.amount' }
     }
     
+    const currencyCode = options.currencyCode || options.currency
+    if (!currencyCode) {
+        throw new Error('Currency could not be determined from options. Ensure currencyCode or currency is provided.')
+    }
+
     return {
         success: true,
         googlePayToken: tokenString,
         billingAddress: paymentData.paymentMethodData?.info?.billingAddress,
         email: paymentData.email,
         orderTotal,
-        currencyCode: options.currencyCode || options.currency || 'USD'
+        currencyCode
     }
 }
 
@@ -254,7 +259,7 @@ async function processGooglePayCheckoutFlow({
     const currencyCode = options.currencyCode || options.currency || basket?.currency
     
     const tokenResult = await initiateGooglePayPayment({
-        amount: orderTotal, currencyCode, displayItems: buildDisplayItemsFromBasket(basket)
+        amount: orderTotal, currencyCode, displayItems: buildDisplayItemsFromBasket(basket, currencyCode)
     })
     
     if (!tokenResult.success) {
@@ -382,7 +387,7 @@ const JPMCCheckoutContext = createContext(null)
  * @param {string} props.locale - Locale ID for multi-MID support (e.g., 'en_CA', 'fr_FR'). Auto-detected from PWA Kit useMultiSite().
  * @param {object} props.commerceConfig - Commerce SDK config for SCAPI calls { proxy, organizationId, siteId }
  */
-export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, useAccessToken, basket: basketProp, locale, currency: currencyProp, commerceConfig }) {
+export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, useAccessToken, basket: basketProp, locale, defaultLocale, currency: currencyProp, commerceConfig }) {
     
     // ==========================================================================
     // SLAS Token Access - For API calls that need shopper authentication
@@ -558,7 +563,7 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         merchantId: applePayConfig.merchantId,
         merchantName: applePayConfig.merchantName,
         countryCode: applePayConfig.countryCode || 'US',
-        currencyCode: currencyProp || basket?.currency || 'USD',
+        currencyCode: currencyProp || basket?.currency,
         supportedNetworks: applePayConfig.supportedNetworks,
         merchantCapabilities: applePayConfig.merchantCapabilities,
         billingAddressRequired: true,
@@ -659,7 +664,8 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         isGooglePayReady,
         isGooglePayAvailable,
         isApplePayAvailable,
-        locale
+        locale,
+        defaultLocale
     })
 
     // ==========================================================================
@@ -872,7 +878,7 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
             const encryptedData = encryptCardForVerification({ cardData, isPIEReady, pieEncrypt })
 
             // Step 2: Persist fraud data for authorization stage
-            const fraudCart = buildFraudShoppingCart(basket?.productItems) || undefined
+            const fraudCart = buildFraudShoppingCart(basket?.productItems, basket?.currency) || undefined
             const fraudShipTo = mapShipToForFraud(basket) || undefined
             persistFraudData({ fraudCart, fraudShipTo, saveFraudCart, saveFraudShipTo })
             
@@ -1028,7 +1034,7 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
                 amount: orderTotal,
                 currencyCode, 
                 merchantOrderNumber,
-                displayItems: buildDisplayItemsFromBasket(basket),
+                displayItems: buildDisplayItemsFromBasket(basket, currencyCode),
                 ...options
             })
             
@@ -1717,6 +1723,12 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         isCreditCardEnabled,
         isGooglePayEnabled,
         isApplePayEnabled,
+        isDropInEnabled: (() => {
+            // Drop-in is enabled when checkoutMode === 'DROP_IN' (from JPMCCheckoutMode BM preference)
+            const dropInEnabled = paymentConfig?.checkoutMode === 'DROP_IN'
+            
+            return dropInEnabled
+        })(),
         
         // Payment method IDs (for GooglePayButton cart flow)
         googlePayPaymentMethodId,
@@ -1793,6 +1805,7 @@ JPMCCheckoutProvider.propTypes = {
     basket: PropTypes.object,
     locale: PropTypes.string,
     currency: PropTypes.string,
+    defaultLocale: PropTypes.string,
     commerceConfig: PropTypes.shape({
         proxy: PropTypes.string,
         organizationId: PropTypes.string,

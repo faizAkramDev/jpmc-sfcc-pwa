@@ -566,4 +566,198 @@ describe('OrderApiClient', () => {
             expect(result.success).toBe(true)
         })
     })
+
+    describe('updateOrderPaymentStatus', () => {
+        it('updates order payment status with timestamp', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    text: () => Promise.resolve(''),
+                    json: () => Promise.resolve({ success: true })
+                }))
+
+            const result = await client.updateOrderPaymentStatus('ORDER123', 'paid')
+
+            expect(result).toEqual({ success: true })
+            expect(global.fetch).toHaveBeenCalledTimes(2)
+            // Check that the request includes the payment status and timestamp
+            const lastCall = global.fetch.mock.calls[1]
+            const requestBody = JSON.parse(lastCall[1].body)
+            expect(requestBody.c_jpmcPaymentStatus).toBe('paid')
+            expect(requestBody.c_jpmcPaymentHoldTimestamp).toBeDefined()
+        })
+
+        it('throws on API failure', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: false,
+                    status: 400,
+                    text: () => Promise.resolve('Bad request')
+                }))
+
+            await expect(client.updateOrderPaymentStatus('ORDER123', 'paid'))
+                .rejects
+                .toThrow('Update order payment status failed: 400')
+        })
+
+        it('updates with different payment statuses', async () => {
+            const statuses = ['not_paid', 'verified', 'failed']
+
+            for (const status of statuses) {
+                jest.clearAllMocks()
+                global.fetch
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: 'test-access-token' })
+                    }))
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        text: () => Promise.resolve(''),
+                        json: () => Promise.resolve({ success: true })
+                    }))
+
+                const result = await client.updateOrderPaymentStatus('ORDER123', status)
+                expect(result).toEqual({ success: true })
+
+                const requestBody = JSON.parse(global.fetch.mock.calls[1][1].body)
+                expect(requestBody.c_jpmcPaymentStatus).toBe(status)
+            }
+        })
+    })
+
+    describe('updateOrderConfirmationStatus', () => {
+        it('updates order confirmation status', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    text: () => Promise.resolve(''),
+                    json: () => Promise.resolve({ success: true })
+                }))
+
+            const result = await client.updateOrderConfirmationStatus('ORDER123', 'confirmed')
+
+            expect(result).toEqual({ success: true })
+            // Verify the request was made with PUT method to confirmation-status endpoint
+            const lastCall = global.fetch.mock.calls[1]
+            expect(lastCall[0]).toContain('ORDER123/confirmation-status')
+            expect(lastCall[1].method).toBe('PUT')
+        })
+
+        it('throws on confirmation status update failure', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: false,
+                    status: 404,
+                    text: () => Promise.resolve('Order not found')
+                }))
+
+            await expect(client.updateOrderConfirmationStatus('ORDER123', 'confirmed'))
+                .rejects
+                .toThrow('Update order confirmation status failed: 404')
+        })
+
+        it('supports pending and confirmed statuses', async () => {
+            const statuses = ['pending', 'confirmed']
+
+            for (const status of statuses) {
+                jest.clearAllMocks()
+                global.fetch
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: 'test-access-token' })
+                    }))
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        text: () => Promise.resolve(''),
+                        json: () => Promise.resolve({ success: true })
+                    }))
+
+                const result = await client.updateOrderConfirmationStatus('ORDER123', status)
+                expect(result).toEqual({ success: true })
+
+                const requestBody = JSON.parse(global.fetch.mock.calls[1][1].body)
+                expect(requestBody.confirmationStatus).toBe(status)
+            }
+        })
+    })
+
+    describe('updateOrderExportStatus', () => {
+        it('updates order export status with timestamp', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    text: () => Promise.resolve(''),
+                    json: () => Promise.resolve({ success: true })
+                }))
+
+            const result = await client.updateOrderExportStatus('ORDER123', 'not_exported')
+
+            expect(result).toEqual({ success: true })
+            const lastCall = global.fetch.mock.calls[1]
+            const requestBody = JSON.parse(lastCall[1].body)
+            expect(requestBody.c_jpmcExportStatus).toBe('not_exported')
+            expect(requestBody.c_jpmcExportHoldTimestamp).toBeDefined()
+        })
+
+        it('throws on export status update failure', async () => {
+            global.fetch
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: true,
+                    json: () => Promise.resolve({ access_token: 'test-access-token' })
+                }))
+                .mockImplementationOnce(() => Promise.resolve({
+                    ok: false,
+                    status: 500,
+                    text: () => Promise.resolve('Server error')
+                }))
+
+            await expect(client.updateOrderExportStatus('ORDER123', 'exported'))
+                .rejects
+                .toThrow('Update order export status failed: 500')
+        })
+
+        it('supports various export statuses', async () => {
+            const statuses = ['not_exported', 'exported', 'ready']
+
+            for (const status of statuses) {
+                jest.clearAllMocks()
+                global.fetch
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        json: () => Promise.resolve({ access_token: 'test-access-token' })
+                    }))
+                    .mockImplementationOnce(() => Promise.resolve({
+                        ok: true,
+                        text: () => Promise.resolve(''),
+                        json: () => Promise.resolve({ success: true })
+                    }))
+
+                const result = await client.updateOrderExportStatus('ORDER123', status)
+                expect(result).toEqual({ success: true })
+
+                const requestBody = JSON.parse(global.fetch.mock.calls[1][1].body)
+                expect(requestBody.c_jpmcExportStatus).toBe(status)
+            }
+        })
+    })
 })

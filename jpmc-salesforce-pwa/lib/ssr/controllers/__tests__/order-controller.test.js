@@ -6,6 +6,7 @@
 
 import {
     configureOrderController,
+    handleCreateOrder,
     handleConfirmOrder,
     handleFailOrder,
     handleUpdateOrderStatus,
@@ -64,6 +65,14 @@ jest.mock('../../../utils/validation/input-validation', () => ({
     })
 }))
 
+jest.mock('../../../utils/locale-extractor', () => ({
+    extractSlasToken: jest.fn((req) => {
+        const authHeader = req.headers?.authorization || ''
+        const match = authHeader.match(/^Bearer\s+(.+)$/)
+        return match ? match[1] : null
+    })
+}))
+
 import { OrderApiClient } from '../../api/order-api'
 import { mapJPMCResponseToAttributes, mapPaymentTransactionAttributes } from '../../api/attribute-mapping'
 import { validateOrderNumber } from '../../../utils/validation/input-validation'
@@ -91,6 +100,8 @@ const createMockReqRes = (overrides = {}) => {
 describe('order-controller', () => {
     beforeEach(() => {
         jest.clearAllMocks()
+        // Mock global fetch
+        global.fetch = jest.fn()
         // Configure controller with default settings
         configureOrderController({
             commerceConfig: {
@@ -111,6 +122,189 @@ describe('order-controller', () => {
                     debug: true
                 })
             }).not.toThrow()
+        })
+    })
+
+    describe('handleCreateOrder', () => {
+        it('creates order successfully with basketId and SLAS token', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: { basketId: 'basket123' },
+                    headers: { authorization: 'Bearer slas_token_xyz' }
+                }
+            })
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({
+                    orderNo: 'ORDER123',
+                    orderTotal: 99.99,
+                    paymentInstruments: []
+                })
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            expect(global.fetch).toHaveBeenCalledWith(
+                expect.stringContaining('/orders?siteId='),
+                expect.objectContaining({
+                    method: 'POST',
+                    headers: expect.objectContaining({
+                        'Authorization': 'Bearer slas_token_xyz'
+                    }),
+                    body: JSON.stringify({ basketId: 'basket123' })
+                })
+            )
+            expect(res.locals.response).toEqual({
+                orderNo: 'ORDER123',
+                orderTotal: 99.99,
+                paymentInstruments: []
+            })
+            expect(next).toHaveBeenCalledTimes(1)
+        })
+
+        it('returns 400 when basketId is missing', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: {},
+                    headers: { authorization: 'Bearer slas_token_xyz' }
+                }
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            expect(res.status).toHaveBeenCalledWith(400)
+            expect(res.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    success: false,
+                    error: 'basketId is required'
+                })
+            )
+            expect(next).not.toHaveBeenCalled()
+        })
+
+        it('returns 401 when SLAS token is missing', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: { basketId: 'basket123' },
+                    headers: {}
+                }
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            expect(res.status).toHaveBeenCalledWith(401)
+            expect(res.json).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    success: false,
+                    error: 'Authorization required'
+                })
+            )
+            expect(next).not.toHaveBeenCalled()
+        })
+
+        it('handles API error and passes to next', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: { basketId: 'basket123' },
+                    headers: { authorization: 'Bearer slas_token_xyz' }
+                }
+            })
+
+            global.fetch.mockResolvedValueOnce({
+                ok: false,
+                status: 400,
+                text: () => Promise.resolve('Invalid basket')
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            expect(next).toHaveBeenCalledWith(expect.any(Error))
+            expect(next.mock.calls[0][0].message).toContain('Create order failed: 400')
+        })
+
+        it('uses environment variables for API config when not provided in controller config', async () => {
+            // Save original env
+            const originalEnv = { ...process.env }
+            
+            try {
+                process.env.COMMERCE_API_SHORT_CODE = 'test-short'
+                process.env.COMMERCE_API_ORG_ID = 'test-org-id'
+                process.env.COMMERCE_API_SITE_ID = 'test-site'
+
+                const { req, res, next } = createMockReqRes({
+                    req: {
+                        body: { basketId: 'basket123' },
+                        headers: { authorization: 'Bearer slas_token' }
+                    }
+                })
+
+                global.fetch.mockResolvedValueOnce({
+                    ok: true,
+                    json: () => Promise.resolve({ orderNo: 'ORDER123' })
+                })
+
+                // Re-configure controller without commerceConfig to use env vars
+                configureOrderController({ commerceConfig: null })
+
+                await handleCreateOrder(req, res, next)
+
+                const callURL = global.fetch.mock.calls[0][0]
+                expect(callURL).toContain('test-short')
+                expect(callURL).toContain('test-org-id')
+                expect(callURL).toContain('test-site')
+            } finally {
+                // Restore env
+                process.env = originalEnv
+            }
+        })
+
+        it('extracts Bearer token from authorization header correctly', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: { basketId: 'basket123' },
+                    headers: { authorization: 'Bearer my-actual-token-123' }
+                }
+            })
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ orderNo: 'ORDER123' })
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            const requestConfig = global.fetch.mock.calls[0][1]
+            expect(requestConfig.headers.Authorization).toBe('Bearer my-actual-token-123')
+        })
+
+        it('constructs correct API URL with siteId query parameter', async () => {
+            const { req, res, next } = createMockReqRes({
+                req: {
+                    body: { basketId: 'basket123' },
+                    headers: { authorization: 'Bearer token' }
+                }
+            })
+
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ orderNo: 'ORDER123' })
+            })
+
+            configureOrderController({
+                commerceConfig: {
+                    shortCode: 'myshort',
+                    orgId: 'myorg',
+                    siteId: 'MySite'
+                }
+            })
+
+            await handleCreateOrder(req, res, next)
+
+            const callURL = global.fetch.mock.calls[0][0]
+            expect(callURL).toMatch(/https:\/\/myshort\.api\.commercecloud\.salesforce\.com/)
+            expect(callURL).toContain('/organizations/myorg/')
+            expect(callURL).toContain('siteId=MySite')
         })
     })
 

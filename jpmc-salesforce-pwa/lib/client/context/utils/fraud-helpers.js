@@ -8,6 +8,8 @@
  * @module @jpmorgan/jpmorgan-salesforce-pwa/client/context/utils/fraud-helpers
  */
 
+import { toMinorUnits } from '../../../utils/currency.js'
+
 // =============================================================================
 // Fraud Shopping Cart Builder
 // =============================================================================
@@ -15,16 +17,17 @@
 /**
  * Build fraudCheckShoppingCart string from basket product items.
  * 
- * Format per JPMC spec: T=type&I=itemId&D=description&Q=qty&P=priceCents&| (max 999 chars)
+ * Format per JPMC spec: T=type&I=itemId&D=description&Q=qty&P=priceMinorUnits&| (max 999 chars)
  * 
  * @param {Array} productItems - basket.productItems array
+ * @param {string} currency - ISO 4217 currency code (e.g., 'USD', 'JPY', 'EUR')
  * @returns {string} Formatted cart string for JPMC fraud check
  * 
  * @example
- * const cart = buildFraudShoppingCart(basket.productItems)
+ * const cart = buildFraudShoppingCart(basket.productItems, basket.currency)
  * // Returns: "T=Product&I=prod123&D=Blue%20T-Shirt&Q=2&P=2999&|T=Product&I=prod456&D=Jeans&Q=1&P=4999&|"
  */
-export const buildFraudShoppingCart = (productItems) => {
+export const buildFraudShoppingCart = (productItems, currency) => {
     if (!productItems || productItems.length === 0) {
         return ''
     }
@@ -35,10 +38,8 @@ export const buildFraudShoppingCart = (productItems) => {
             const itemId = encodeURIComponent(item.productId || item.itemId || '')
             const desc = encodeURIComponent((item.productName || item.name || '').substring(0, 50))
             const qty = Math.round(item.quantity || 1)
-            // Convert price to cents
-            const price = Math.round(
-                (item.adjustedPrice ?? item.price ?? 0) * 100
-            )
+            // Convert price to minor units (cents, yen, millifilses, etc.)
+            const price = toMinorUnits(item.adjustedPrice ?? item.price ?? 0, currency)
             return `T=${type}&I=${itemId}&D=${desc}&Q=${qty}&P=${price}&|`
         })
         .join('')

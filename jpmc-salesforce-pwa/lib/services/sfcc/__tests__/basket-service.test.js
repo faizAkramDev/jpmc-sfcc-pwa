@@ -7,10 +7,12 @@
 const {
     translateGooglePayAddressToSFCC,
     translateSFCCShippingMethodToGooglePay,
-    buildDisplayItemsFromBasket,
     buildGooglePayShippingResponse,
     buildGooglePayErrorResponse
 } = require('../basket-service')
+
+// Import display items builder directly from source for testing
+const { buildDisplayItemsFromBasket } = require('../../../client/utils/display-items.js')
 
 // =============================================================================
 // Mock Setup
@@ -244,19 +246,51 @@ describe('translateSFCCShippingMethodToGooglePay', () => {
 // =============================================================================
 
 describe('buildDisplayItemsFromBasket', () => {
-    it('should build display items from basket totals', () => {
+    it('should build display items from basket totals with currency-aware formatting', () => {
         const basket = {
             productSubTotal: 89.99,
             shippingTotal: 5.99,
             taxTotal: 7.50
         }
 
-        const result = buildDisplayItemsFromBasket(basket)
+        const result = buildDisplayItemsFromBasket(basket, 'USD')
 
         expect(result).toEqual([
             { label: 'Subtotal', type: 'SUBTOTAL', price: '89.99' },
             { label: 'Shipping', type: 'LINE_ITEM', price: '5.99', status: 'FINAL' },
-            { label: 'Tax', type: 'TAX', price: '7.5' }
+            { label: 'Tax', type: 'TAX', price: '7.50' }
+        ])
+    })
+
+    it('should format amounts with zero decimals for JPY currency', () => {
+        const basket = {
+            productSubTotal: 1000,
+            shippingTotal: 500,
+            taxTotal: 0
+        }
+
+        const result = buildDisplayItemsFromBasket(basket, 'JPY')
+
+        expect(result).toEqual([
+            { label: 'Subtotal', type: 'SUBTOTAL', price: '1000' },
+            { label: 'Shipping', type: 'LINE_ITEM', price: '500', status: 'FINAL' },
+            { label: 'Tax', type: 'TAX', price: '0' }
+        ])
+    })
+
+    it('should format amounts with three decimals for KWD currency', () => {
+        const basket = {
+            productSubTotal: 100.123,
+            shippingTotal: 5.456,
+            taxTotal: 10.789
+        }
+
+        const result = buildDisplayItemsFromBasket(basket, 'KWD')
+
+        expect(result).toEqual([
+            { label: 'Subtotal', type: 'SUBTOTAL', price: '100.123' },
+            { label: 'Shipping', type: 'LINE_ITEM', price: '5.456', status: 'FINAL' },
+            { label: 'Tax', type: 'TAX', price: '10.789' }
         ])
     })
 
@@ -267,19 +301,19 @@ describe('buildDisplayItemsFromBasket', () => {
             taxTotal: 0
         }
 
-        const result = buildDisplayItemsFromBasket(basket)
+        const result = buildDisplayItemsFromBasket(basket, 'USD')
 
         expect(result[1]).toEqual({
             label: 'Shipping',
             type: 'LINE_ITEM',
-            price: '0',
+            price: '0.00',
             status: 'PENDING'
         })
         // TAX type does not support status field per Google Pay API
         expect(result[2]).toEqual({
             label: 'Tax',
             type: 'TAX',
-            price: '0'
+            price: '0.00'
         })
     })
 
@@ -294,24 +328,45 @@ describe('buildDisplayItemsFromBasket', () => {
             ]
         }
 
-        const result = buildDisplayItemsFromBasket(basket)
+        const result = buildDisplayItemsFromBasket(basket, 'USD')
 
         expect(result).toContainEqual({
             label: 'Discount',
             type: 'LINE_ITEM',
-            price: '-10'
+            price: '-10.00'
         })
         expect(result).toContainEqual({
             label: 'Discount',
             type: 'LINE_ITEM',
-            price: '-5'
+            price: '-5.00'
         })
+    })
+
+    it('should support custom labels', () => {
+        const basket = {
+            productSubTotal: 89.99,
+            shippingTotal: 5.99,
+            taxTotal: 7.50,
+            orderPriceAdjustments: [{ price: -5.00 }]
+        }
+
+        const result = buildDisplayItemsFromBasket(basket, 'USD', {
+            subtotal: 'Sous-total',
+            shipping: 'Livraison',
+            tax: 'Taxes',
+            discount: 'Réduction'
+        })
+
+        expect(result[0].label).toBe('Sous-total')
+        expect(result[1].label).toBe('Livraison')
+        expect(result[2].label).toBe('Taxes')
+        expect(result[3].label).toBe('Réduction')
     })
 
     it('should handle empty basket', () => {
         const basket = {}
 
-        const result = buildDisplayItemsFromBasket(basket)
+        const result = buildDisplayItemsFromBasket(basket, 'USD')
 
         expect(result).toEqual([])
     })
@@ -376,13 +431,13 @@ describe('buildGooglePayShippingResponse', () => {
         expect(result.newTransactionInfo.totalPrice).toBe('75')
     })
 
-    it('should default currency to USD', () => {
+    it('should pass currency as undefined when not provided in basket', () => {
         const basket = { orderTotal: 100.00 }
         const shippingMethods = []
 
         const result = buildGooglePayShippingResponse(basket, shippingMethods)
 
-        expect(result.newTransactionInfo.currencyCode).toBe('USD')
+        expect(result.newTransactionInfo.currencyCode).toBeUndefined()
     })
 })
 

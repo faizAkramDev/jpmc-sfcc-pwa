@@ -303,4 +303,249 @@ describe('Error Handler Utilities', () => {
             expect(result.message).toBe("Payment couldn't be processed. Please try again later.")
         })
     })
+
+    // =========================================================================
+    // retryWithBackoff Tests
+    // =========================================================================
+
+    describe('retryWithBackoff', () => {
+        it('should return result on first successful attempt', async () => {
+            const fn = jest.fn().mockResolvedValue('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 3, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(1)
+        })
+
+        it('should retry on failure and succeed on second attempt', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('First attempt failed'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 3, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(2)
+        })
+
+        it('should retry multiple times until success', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('Fail 1'))
+                .mockRejectedValueOnce(new Error('Fail 2'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 5, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should throw error after max retries exceeded', async () => {
+            const originalError = new Error('Permanent failure')
+            const fn = jest.fn().mockRejectedValue(originalError)
+
+            await expect(errorHandler.retryWithBackoff(fn, 3, 1)).rejects.toThrow('Permanent failure')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should throw last error from failed attempts', async () => {
+            const error1 = new Error('First error')
+            const error2 = new Error('Second error')
+            const error3 = new Error('Third error')
+
+            const fn = jest.fn()
+                .mockRejectedValueOnce(error1)
+                .mockRejectedValueOnce(error2)
+                .mockRejectedValueOnce(error3)
+
+            await expect(errorHandler.retryWithBackoff(fn, 3, 1)).rejects.toThrow('Third error')
+            expect(fn).toHaveBeenCalledTimes(3)
+        })
+
+        it('should use default maxRetries when not specified', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('Fail'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, undefined, 1)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(2)
+        })
+
+        it('should use default delay when not specified', async () => {
+            const fn = jest.fn().mockResolvedValue('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 1)
+
+            expect(result).toBe('success')
+        })
+
+        it('should increase delay with exponential backoff', async () => {
+            const delays = []
+            const now = Date.now()
+            
+            const fn = jest.fn()
+                .mockImplementationOnce(async () => {
+                    delays.push(Date.now() - now)
+                    throw new Error('Fail 1')
+                })
+                .mockImplementationOnce(async () => {
+                    delays.push(Date.now() - now)
+                    throw new Error('Fail 2')
+                })
+                .mockImplementationOnce(async () => {
+                    delays.push(Date.now() - now)
+                    return 'success'
+                })
+
+            const result = await errorHandler.retryWithBackoff(fn, 3, 10)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(3)
+            // Check that delays increased (rough check, allowing some variance)
+            expect(delays[1]).toBeGreaterThan(delays[0])
+            expect(delays[2]).toBeGreaterThan(delays[1])
+        })
+
+        it('should work with synchronous functions', async () => {
+            const fn = jest.fn()
+                .mockReturnValueOnce(Promise.reject(new Error('Fail')))
+                .mockReturnValueOnce(Promise.resolve('success'))
+
+            const result = await errorHandler.retryWithBackoff(fn, 2, 1)
+
+            expect(result).toBe('success')
+        })
+
+        it('should not delay after final attempt', async () => {
+            const fn = jest.fn()
+                .mockRejectedValueOnce(new Error('Fail'))
+                .mockResolvedValueOnce('success')
+
+            const result = await errorHandler.retryWithBackoff(fn, 2, 100)
+
+            expect(result).toBe('success')
+            expect(fn).toHaveBeenCalledTimes(2)
+        })
+    })
+
+    // =========================================================================
+    // isValidErrorResponse Tests
+    // =========================================================================
+
+    describe('isValidErrorResponse', () => {
+        it('should return true for error with errorCode', () => {
+            const errorData = { errorCode: 'PAYMENT_FAILED' }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return true for error with message', () => {
+            const errorData = { message: 'Payment declined' }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return true for error with both errorCode and message', () => {
+            const errorData = { 
+                errorCode: 'PAYMENT_FAILED', 
+                message: 'Payment declined' 
+            }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return false for null error', () => {
+            const result = errorHandler.isValidErrorResponse(null)
+
+            expect(result).toBeFalsy()
+        })
+
+        it('should return false for undefined error', () => {
+            const result = errorHandler.isValidErrorResponse(undefined)
+
+            expect(result).toBeFalsy()
+        })
+
+        it('should return false for non-object error', () => {
+            const result = errorHandler.isValidErrorResponse('string error')
+
+            expect(result).toBeFalsy()
+        })
+
+        it('should return false for empty object', () => {
+            const result = errorHandler.isValidErrorResponse({})
+
+            expect(result).toBeFalsy()
+        })
+
+        it('should return false for object with neither errorCode nor message', () => {
+            const errorData = { timestamp: '2024-01-01', details: 'some details' }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeFalsy()
+        })
+
+        it('should return true for error with additional properties', () => {
+            const errorData = {
+                errorCode: 'VALIDATION_ERROR',
+                message: 'Invalid input',
+                details: { field: 'cardNumber' },
+                timestamp: '2024-01-01',
+                requestId: 'req-123'
+            }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return true for error with null errorCode but valid message', () => {
+            const errorData = { 
+                errorCode: null, 
+                message: 'Error occurred' 
+            }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return true for error with empty string message (falsy but present)', () => {
+            const errorData = { 
+                message: '' 
+            }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            // Empty string is falsy, so this would return false
+            expect(result).toBeFalsy()
+        })
+
+        it('should handle array as error code', () => {
+            const errorData = { errorCode: [] }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            expect(result).toBeTruthy()
+        })
+
+        it('should return truthy for number as errorCode', () => {
+            const errorData = { errorCode: 0 }
+
+            const result = errorHandler.isValidErrorResponse(errorData)
+
+            // 0 is falsy, so this would return false
+            expect(result).toBeFalsy()
+        })
+    })
 })

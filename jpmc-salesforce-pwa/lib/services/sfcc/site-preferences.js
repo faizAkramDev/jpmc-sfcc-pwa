@@ -75,7 +75,8 @@ const getSFCCConfig = () => {
         orgId: process.env.COMMERCE_API_ORG_ID,
         siteId: process.env.COMMERCE_API_SITE_ID,
         realmId: process.env.SFCC_REALM_ID,
-        instanceId: process.env.SFCC_INSTANCE_ID
+        instanceId: process.env.SFCC_INSTANCE_ID,
+        accountManagerHost: process.env.SFCC_ACCOUNT_MANAGER_HOST || 'account.demandware.com'
     }
 
     // Validate required fields
@@ -99,7 +100,7 @@ const getSFCCConfig = () => {
  * @throws {Error} If token request fails
  */
 const getAccessToken = async (sfccConfig) => {
-    const { clientId, clientSecret, realmId, instanceId } = sfccConfig
+    const { clientId, clientSecret, realmId, instanceId, accountManagerHost } = sfccConfig
 
     // Build scope with preferences permission
     const scope = `SALESFORCE_COMMERCE_API:${realmId}_${instanceId} sfcc.preferences`
@@ -107,7 +108,7 @@ const getAccessToken = async (sfccConfig) => {
     // Base64 encode credentials
     const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
 
-    const response = await fetch('https://account.demandware.com/dwsso/oauth2/access_token', {
+    const response = await fetch(`https://${accountManagerHost}/dwsso/oauth2/access_token`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
