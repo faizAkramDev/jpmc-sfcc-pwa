@@ -1128,7 +1128,8 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
         // Use actual order total (reflects promo codes applied on review page) instead of payment instrument amount
         const paymentAmount = orderResult?.orderTotal || paymentInstrument?.amount
-        
+    refetchBasket?.()
+
         // Step 4: Authorize with JPMC (server patches order when paymentInstrumentId provided)
         const authResult = await authorize({
             amount: orderTotal, currency: currencyCode, merchantOrderNumber: orderResult.orderNo,
@@ -1287,6 +1288,8 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
 
             return { success: false, step: failedStep, error, orderNo }
         }
+
+        refetchBasket?.()
 
         // Step 4: Confirm order server-side (only if server didn't patch)
         const { orderNo, orderResult, data: authResult } = applePayResult
