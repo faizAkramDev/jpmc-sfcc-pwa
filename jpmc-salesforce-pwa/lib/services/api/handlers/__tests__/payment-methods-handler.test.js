@@ -398,13 +398,13 @@ describe('Payment Methods Handler', () => {
             delete process.env.COMMERCE_API_ORG_ID
         })
 
-        it('should default siteId to RefArchGlobal when not set', async () => {
+        it('should call API with undefined siteId when not configured (strict mode - no fallback)', async () => {
             delete process.env.SFCC_SITE_ID
 
             await handleGetAvailablePaymentMethods(mockReq, mockRes)
 
             expect(mockFetch).toHaveBeenCalledWith(
-                expect.stringContaining('siteId=RefArchGlobal'),
+                expect.stringContaining('siteId=undefined'),
                 expect.any(Object)
             )
         })

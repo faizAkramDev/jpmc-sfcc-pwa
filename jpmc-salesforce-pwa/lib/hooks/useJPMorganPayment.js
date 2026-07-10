@@ -36,15 +36,26 @@ const fetchJPMCConfig = async ({ locale, getAccessToken, apiBasePath }) => {
         : `${apiBasePath}/config`
     
     const headers = { 'Content-Type': 'application/json' }
+    let slasTokenStatus = 'not_attempted'
+    
     if (getAccessToken) {
         try {
             const token = await getAccessToken()
             if (token) {
                 headers['Authorization'] = `Bearer ${token}`
+                slasTokenStatus = 'obtained'
+            } else {
+                slasTokenStatus = 'null_response'
+                console.warn('[useJPMorganPayment] ⚠️  getAccessToken() returned null/undefined - custom object lookup will be SKIPPED, using Site Preferences instead')
             }
-        } catch (_tokenErr) {
+        } catch (tokenErr) {
+            slasTokenStatus = 'error'
+            console.warn('[useJPMorganPayment] ⚠️  Failed to get SLAS token:', tokenErr?.message, '- custom object lookup will be SKIPPED, using Site Preferences instead')
             // Token fetch failed, proceed without it (will fall back to Site Preferences)
         }
+    } else {
+        slasTokenStatus = 'not_provided'
+        console.warn('[useJPMorganPayment] ⚠️  getAccessToken function not provided - custom object lookup will be SKIPPED, using Site Preferences instead')
     }
     
     const configResponse = await fetch(configUrl, {
@@ -53,8 +64,11 @@ const fetchJPMCConfig = async ({ locale, getAccessToken, apiBasePath }) => {
     })
     
     if (configResponse.ok) {
-        return await configResponse.json()
+        const config = await configResponse.json()
+        
+        return config
     }
+    
     
     return null
 }
@@ -191,8 +205,8 @@ const isCardMasked = (cardData) => {
     
     if (!cardNumber) return true
     
-    if (/[\*Xx]{4,}/.test(cardNumber)) return true
-    if (/^[\*Xx\s\-]+\d{4}$/.test(cardNumber)) return true
+    if (/[*Xx]{4,}/.test(cardNumber)) return true
+    if (/^[*Xx\s-]+\d{4}$/.test(cardNumber)) return true
     if (cardNumber.length <= 4) return true
     
     return false
@@ -286,8 +300,17 @@ export const useJPMorganPayment = (options = {}) => {
                     pieUrls = serverConfig.pieUrls
                     const captureMethod = serverConfig.captureMethod
                     
+                    
+                    
                     if (mountedRef.current) {
-                        setConfig({ merchantId, pieUrls, captureMethod })
+                        setConfig({
+                            merchantId,
+                            pieUrls,
+                            captureMethod,
+                            checkoutMode: serverConfig.checkoutMode || 'PIE',
+                            dropInEnabled: serverConfig.dropInEnabled === true,
+                            dropInScriptUrl: serverConfig.dropInScriptUrl || null
+                        })
                     }
                 }
             }

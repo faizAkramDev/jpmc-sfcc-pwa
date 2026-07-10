@@ -388,6 +388,10 @@ const JPMCCheckoutContext = createContext(null)
  * @param {object} props.commerceConfig - Commerce SDK config for SCAPI calls { proxy, organizationId, siteId }
  */
 export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, useAccessToken, basket: basketProp, locale, defaultLocale, currency: currencyProp, commerceConfig }) {
+    
+    // ==========================================================================
+    // SLAS Token Access - For API calls that need shopper authentication
+    // ==========================================================================
     // eslint-disable-next-line react-hooks/rules-of-hooks
     const accessTokenHook = useAccessToken ? useAccessToken() : null
     const getAccessToken = accessTokenHook?.getTokenWhenReady
@@ -653,7 +657,8 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         applePayPaymentMethodId,
         isCreditCardEnabled,
         isGooglePayEnabled,
-        isApplePayEnabled
+        isApplePayEnabled,
+        isLoading: isLoadingPaymentMethods
     } = usePaymentMethods({
         basketId: basket?.basketId,
         getAccessToken,
@@ -1128,7 +1133,8 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
         // Use actual order total (reflects promo codes applied on review page) instead of payment instrument amount
         const paymentAmount = orderResult?.orderTotal || paymentInstrument?.amount
-    refetchBasket?.()
+
+        refetchBasket?.()
 
         // Step 4: Authorize with JPMC (server patches order when paymentInstrumentId provided)
         const authResult = await authorize({
@@ -1421,7 +1427,6 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         // Use actual order total (reflects promo codes applied on review page) instead of payment instrument amount
         const paymentAmount = orderResult?.orderTotal || paymentInstrument?.amount
 
-        // Basket is now consumed — invalidate the cached basket so the cart clears immediately
         refetchBasket?.()
 
         // Step 2: Authorize payment with JPMC (now we have orderNo for merchantOrderNumber)
@@ -1624,7 +1629,7 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         pieError,
         // Aliases
         isReady: isPIEReady,
-        isLoading: isPIELoading,
+        isLoading: isPIELoading || isLoadingPaymentMethods,
         error: pieError || authorizationError || verificationError || googlePayError || applePayError,
         // Payment error aliases (for payment.jsx compatibility)
         paymentError: authorizationError || verificationError || googlePayError || applePayError,
@@ -1725,6 +1730,12 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         isCreditCardEnabled,
         isGooglePayEnabled,
         isApplePayEnabled,
+        isDropInEnabled: (() => {
+            // Drop-in is enabled when checkoutMode === 'DROP_IN' (from JPMCCheckoutMode BM preference)
+            const dropInEnabled = paymentConfig?.checkoutMode === 'DROP_IN'
+            
+            return dropInEnabled
+        })(),
         
         // Payment method IDs (for GooglePayButton cart flow)
         googlePayPaymentMethodId,
@@ -1756,6 +1767,7 @@ export function JPMCCheckoutProvider({ children, config = {}, useBasketHook, use
         registerThreeDSCallbacks
     }), [
         locale, getAccessToken, accessTokenHook?.token, isPIEReady, isPIELoading, pieError,
+        isLoadingPaymentMethods,
         authorizationError, verificationError, googlePayError, applePayError, resetPaymentError,
         cardFormData, encryptedCardData, storeCardFormData, encryptCardData,
         billingAddress, setBillingAddress, selectedPaymentMethodId, setSelectedPaymentMethodId,
@@ -1800,8 +1812,8 @@ JPMCCheckoutProvider.propTypes = {
     useAccessToken: PropTypes.func,
     basket: PropTypes.object,
     locale: PropTypes.string,
-    defaultLocale: PropTypes.string,
     currency: PropTypes.string,
+    defaultLocale: PropTypes.string,
     commerceConfig: PropTypes.shape({
         proxy: PropTypes.string,
         organizationId: PropTypes.string,

@@ -34,9 +34,9 @@ const getSitesConfig = () => {
         // Try to get __dirname from import.meta (ESM mode)
         // Wrap import.meta check to avoid Babel parser errors in CommonJS
         try {
-            // Use eval to bypass Babel parsing of import.meta literal
+            // Use Function constructor to access import.meta safely
             // This allows the code to run in both ESM and CommonJS environments
-            const getImportMeta = () => eval('import.meta')
+            const getImportMeta = new Function('return import.meta')
             const meta = getImportMeta()
             if (meta && meta.url) {
                 const __dirname = dirname(fileURLToPath(meta.url))
@@ -63,8 +63,11 @@ const getSitesConfig = () => {
                 // Basic CommonJS module.exports parsing
                 const moduleExportsMatch = content.match(/module\.exports\s*=\s*(\[[\s\S]*?\])/m)
                 if (moduleExportsMatch) {
-                    // eslint-disable-next-line no-eval
-                    sitesConfigCache = eval(moduleExportsMatch[1])
+                    // Use Function constructor instead of eval - safer approach for JSON/object parsing
+                    // Function constructor runs in different scope and prevents direct variable access
+                    const dataStr = moduleExportsMatch[1]
+                    const func = new Function('return ' + dataStr)
+                    sitesConfigCache = func()
                     logger.info('[Site Config] Loaded sites configuration from:', path)
                     return sitesConfigCache
                 }

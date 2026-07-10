@@ -83,8 +83,8 @@ export const getAccessToken = async (config, forceRefresh = false) => {
                 resource: config.resourceId
             })
             
-            logger.info('[OAuth] Token request to:', JPMC_TOKEN_URI)
-            logger.info('[OAuth] Resource:', config.resourceId)
+            logger.debug('[OAuth] Token request to:', JPMC_TOKEN_URI)
+            logger.debug('[OAuth] Resource:', config.resourceId)
             
             // Make token request
             const response = await fetch(JPMC_TOKEN_URI, {
@@ -157,10 +157,10 @@ export const verifyAuthConfiguration = (config) => {
     // Try to load private key (just validates it can be loaded)
     loadPrivateKey(config)
     
-    logger.info('[OAuth] ✅ Configuration verified successfully')
-    logger.info('[OAuth] Client ID:', config.clientId ? config.clientId.substring(0, 15) + '...' : 'NOT SET')
-    logger.info('[OAuth] Token URI:', JPMC_TOKEN_URI)
-    logger.info('[OAuth] Certificate thumbprint:', thumbprint)
+    logger.info('[OAuth] Configuration verified successfully')
+    logger.debug('[OAuth] Client ID:', config.clientId ? config.clientId.substring(0, 15) + '...' : 'NOT SET')
+    logger.debug('[OAuth] Token URI:', JPMC_TOKEN_URI)
+    logger.debug('[OAuth] Certificate thumbprint generated successfully')
     
     return {
         valid: true,

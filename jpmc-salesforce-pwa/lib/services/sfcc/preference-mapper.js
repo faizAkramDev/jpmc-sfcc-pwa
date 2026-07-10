@@ -79,7 +79,15 @@ const PREFERENCE_MAPPING = {
     JPMCApplePaySupportedNetworks: 'applePaySupportedNetworks',
     JPMCApplePayMerchantCapabilities: 'applePayMerchantCapabilities',
 
-    jpmc3DSEnabled: 'jpmc3DSEnabled'
+    // 3D Secure Configuration
+    jpmc3DSEnabled: 'jpmc3DSEnabled',
+
+    // Drop-in UI Configuration
+    JPMCCheckoutMode: 'checkoutMode',
+    JPMCDropInScriptUrl: 'dropInScriptUrl',
+    JPMCDropInIntentUrl: 'checkoutIntentUrl',
+    JPMCDropInThemeOverrides: 'dropInThemeOverrides',
+    JPMCSaveConsumerProfile: 'saveConsumerProfile'
 }
 
 /**
@@ -120,6 +128,15 @@ export const buildJPMCConfigFromPreferences = (preferences) => {
         }
     }
 
+    // Log drop-in configuration
+    logger.debug('[Preference Mapper] Drop-in UI Configuration:', {
+        checkoutMode: config.checkoutMode || 'NOT_SET',
+        isDropInEnabled: config.checkoutMode === 'DROP_IN',
+        dropInScriptUrl: config.dropInScriptUrl || 'NOT_SET',
+        dropInThemeOverrides: config.dropInThemeOverrides ? 'Configured' : 'NOT_SET',
+        saveConsumerProfile: config.saveConsumerProfile !== undefined ? config.saveConsumerProfile : 'NOT_SET'
+    })
+
     // NO defaults applied - all values must come from BM
     // Log warning for any values that were previously defaulted but are now missing
     const requiredConfigs = [
@@ -135,7 +152,7 @@ export const buildJPMCConfigFromPreferences = (preferences) => {
     if (config.apiHost) {
         // Strip protocol if present (BM preference should be host only)
         config.apiHost = config.apiHost.replace(/^https?:\/\//, '')
-        logger.info('[Preference Mapper] API Host from BM preference:', config.apiHost)
+        logger.debug('[Preference Mapper] API Host from BM preference:', config.apiHost)
     } else {
         logger.error('[Preference Mapper] Missing JPMCApiHost - must be configured in BM')
     }

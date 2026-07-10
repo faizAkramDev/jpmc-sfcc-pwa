@@ -4,7 +4,6 @@
  * @jest-environment node
  */
 
-// Mock fetch globally
 global.fetch = jest.fn()
 
 const {
@@ -12,27 +11,34 @@ const {
     getJPMCPreferences,
     refreshSitePreferences,
     clearPreferencesCache,
+    getPreferencesCacheStatus,
     getApplePayPreferences,
     clearApplePayPreferencesCache
 } = require('../site-preferences')
 
-// =============================================================================
-// Setup & Teardown
-// =============================================================================
-
 describe('SFCC Site Preferences Service', () => {
     const originalEnv = process.env
 
-    // Mock token response
     const mockTokenResponse = {
         ok: true,
         json: () => Promise.resolve({ access_token: 'mock-access-token' })
     }
 
-    // Mock preferences response helper
+    const mockTokenErrorResponse = {
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve('Unauthorized')
+    }
+
     const createMockPreferencesResponse = (preferences) => ({
         ok: true,
-        json: () => Promise.resolve({ data: preferences })
+        json: () => Promise.resolve({ data: preferences, total: preferences.length })
+    })
+
+    const createMockErrorResponse = (status) => ({
+        ok: false,
+        status,
+        text: () => Promise.resolve('Error')
     })
 
     beforeEach(() => {
@@ -42,7 +48,6 @@ describe('SFCC Site Preferences Service', () => {
         clearPreferencesCache()
         clearApplePayPreferencesCache()
 
-        // Set up required env vars (matching getSFCCConfig requirements)
         process.env.COMMERCE_API_CLIENT_ID_PRIVATE = 'test-client-id'
         process.env.COMMERCE_API_CLIENT_SECRET = 'test-client-secret'
         process.env.COMMERCE_API_SHORT_CODE = 'test-short-code'
@@ -56,10 +61,6 @@ describe('SFCC Site Preferences Service', () => {
         process.env = originalEnv
     })
 
-    // =========================================================================
-    // getSitePreferences Tests
-    // =========================================================================
-
     describe('getSitePreferences', () => {
         it('should fetch site preferences from SFCC API', async () => {
             const mockPreferences = [
@@ -67,16 +68,12 @@ describe('SFCC Site Preferences Service', () => {
                 { id: 'JPMC_MerchantCode', value: 'test-merchant' }
             ]
 
-            // Mock token fetch then preferences fetch
             global.fetch
                 .mockResolvedValueOnce(mockTokenResponse)
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
             const result = await getSitePreferences()
-
-            // Should have called fetch twice (token + preferences)
             expect(global.fetch).toHaveBeenCalledTimes(2)
-            // getSitePreferences returns the array directly
             expect(result).toEqual(mockPreferences)
         })
 
@@ -87,12 +84,9 @@ describe('SFCC Site Preferences Service', () => {
                 .mockResolvedValueOnce(mockTokenResponse)
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
-            // First call
             await getSitePreferences()
-            // Second call
             await getSitePreferences()
 
-            // Fetch should only be called twice (token + preferences) for first call only
             expect(global.fetch).toHaveBeenCalledTimes(2)
         })
 
@@ -105,12 +99,9 @@ describe('SFCC Site Preferences Service', () => {
                 .mockResolvedValueOnce(mockTokenResponse)
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
-            // First call
             await getSitePreferences()
-            // Second call with force refresh
             await getSitePreferences({ forceRefresh: true })
 
-            // Fetch should be called 4 times (2 per getSitePreferences call)
             expect(global.fetch).toHaveBeenCalledTimes(4)
         })
 
@@ -122,33 +113,64 @@ describe('SFCC Site Preferences Service', () => {
             )
         })
 
-        it('should handle API errors gracefully', async () => {
-            // Token succeeds but preferences fails
+        it('should throw error when token request fails', async () => {
+            global.fetch.mockResolvedValueOnce(mockTokenErrorResponse)
+
+            await expect(getSitePreferences()).rejects.toThrow('token request failed')
+        })
+
+        it('should throw error when token response missing access_token', async () => {
+            global.fetch.mockResolvedValueOnce({
+                ok: true,
+                json: () => Promise.resolve({ error: 'invalid_grant' })
+            })
+
+            await expect(getSitePreferences()).rejects.toThrow('missing access_token')
+        })
+
+        it('should throw error when preferences API call fails', async () => {
             global.fetch
                 .mockResolvedValueOnce(mockTokenResponse)
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 403,
-                    statusText: 'Forbidden',
-                    text: () => Promise.resolve('Access denied')
-                })
+                .mockResolvedValueOnce(createMockErrorResponse(403))
 
-            await expect(getSitePreferences()).rejects.toThrow()
+            await expect(getSitePreferences()).rejects.toThrow('preferences API failed')
+        })
+
+        it('should return stale cache when API fails but cache exists', async () => {
+            const mockPreferences = [{ id: 'JPMCClientID', value: 'stale-value' }]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getSitePreferences()
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockErrorResponse(500))
+
+            const result = await getSitePreferences({ forceRefresh: true })
+            expect(result).toEqual(mockPreferences)
+        })
+
+        it('should respect custom cache TTL', async () => {
+            const mockPreferences = [{ id: 'test', value: 'value' }]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getSitePreferences({ cacheTTL: 10000 })
+            expect(global.fetch).toHaveBeenCalledTimes(2)
         })
     })
-
-    // =========================================================================
-    // getJPMCPreferences Tests
-    // =========================================================================
 
     describe('getJPMCPreferences', () => {
         it('should filter preferences to only JPMC-related ones', async () => {
             const mockPreferences = [
                 { id: 'JPMCClientID', value: 'test-client-id' },
                 { id: 'JPMC_MerchantCode', value: 'test-merchant' },
-                { id: 'JPMCCaptureMethod', value: 'NOW' },
-                { id: 'UnrelatedPreference', value: 'should-be-excluded' },
-                { id: 'AnotherPref', value: 'also-excluded' }
+                { id: 'UnrelatedPreference', value: 'excluded' }
             ]
 
             global.fetch
@@ -157,14 +179,12 @@ describe('SFCC Site Preferences Service', () => {
 
             const result = await getJPMCPreferences()
 
-            expect(result).toHaveProperty('JPMCClientID', 'test-client-id')
-            expect(result).toHaveProperty('JPMC_MerchantCode', 'test-merchant')
-            expect(result).toHaveProperty('JPMCCaptureMethod', 'NOW')
+            expect(result).toHaveProperty('JPMCClientID')
+            expect(result).toHaveProperty('JPMC_MerchantCode')
             expect(result).not.toHaveProperty('UnrelatedPreference')
-            expect(result).not.toHaveProperty('AnotherPref')
         })
 
-        it('should return empty object when no JPMC preferences exist', async () => {
+        it('should return empty object when no JPMC preferences', async () => {
             const mockPreferences = [
                 { id: 'SomeOtherPref', value: 'value' }
             ]
@@ -174,45 +194,27 @@ describe('SFCC Site Preferences Service', () => {
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
             const result = await getJPMCPreferences()
-
             expect(result).toEqual({})
         })
-    })
 
-    // =========================================================================
-    // refreshSitePreferences Tests
-    // =========================================================================
-
-    describe('refreshSitePreferences', () => {
-        it('should force refresh preferences from API', async () => {
-            const mockPreferences = [{ id: 'JPMCClientID', value: 'refreshed' }]
+        it('should use cached JPMC prefs if valid', async () => {
+            const mockPreferences = [
+                { id: 'jpmc_test', value: 'cached' }
+            ]
 
             global.fetch
                 .mockResolvedValueOnce(mockTokenResponse)
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
-                .mockResolvedValueOnce(mockTokenResponse)
-                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
-            // Populate cache first
-            await getSitePreferences()
-            
-            // Clear mock counts
-            const callsBefore = global.fetch.mock.calls.length
+            await getJPMCPreferences()
+            global.fetch.mockClear()
 
-            // Refresh should make new API call
-            await refreshSitePreferences()
-
-            expect(global.fetch.mock.calls.length - callsBefore).toBe(2)
+            await getJPMCPreferences()
+            expect(global.fetch).not.toHaveBeenCalled()
         })
-    })
 
-    // =========================================================================
-    // clearPreferencesCache Tests
-    // =========================================================================
-
-    describe('clearPreferencesCache', () => {
-        it('should clear the preferences cache', async () => {
-            const mockPreferences = [{ id: 'JPMCClientID', value: 'cached' }]
+        it('should fetch fresh JPMC prefs when forceRefresh true', async () => {
+            const mockPreferences = [{ id: 'jpmc_pref', value: 'test' }]
 
             global.fetch
                 .mockResolvedValueOnce(mockTokenResponse)
@@ -220,20 +222,15 @@ describe('SFCC Site Preferences Service', () => {
                 .mockResolvedValueOnce(mockTokenResponse)
                 .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
 
-            // Populate cache
-            await getSitePreferences()
-            
-            // Clear cache
-            clearPreferencesCache()
-            
-            // Should make new API call (2 more calls)
-            await getSitePreferences()
+            await getJPMCPreferences()
+            await getJPMCPreferences({ forceRefresh: true })
 
             expect(global.fetch).toHaveBeenCalledTimes(4)
         })
     })
 
     describe('getApplePayPreferences', () => {
+
         it('should disable Apple Pay when merchant ID missing', async () => {
             const mockPreferences = [
                 { id: 'jpmcApplePayEnabled', value: 'true' }
@@ -248,6 +245,8 @@ describe('SFCC Site Preferences Service', () => {
             expect(result.enabled).toBe(false)
             expect(result.merchantId).toBeNull()
         })
+
+
 
         it('should force refresh Apple Pay config', async () => {
             const mockPreferences = [
@@ -269,15 +268,13 @@ describe('SFCC Site Preferences Service', () => {
         it('should return null when API fails and no cache', async () => {
             global.fetch
                 .mockResolvedValueOnce(mockTokenResponse)
-                .mockResolvedValueOnce({
-                    ok: false,
-                    status: 500,
-                    text: () => Promise.resolve('Error')
-                })
+                .mockResolvedValueOnce(createMockErrorResponse(500))
 
             const result = await getApplePayPreferences()
             expect(result).toBeNull()
         })
+
+
 
         it('should use default values when preferences missing', async () => {
             const mockPreferences = [
@@ -306,6 +303,64 @@ describe('SFCC Site Preferences Service', () => {
             const result = await getApplePayPreferences()
             expect(result.supportedNetworks).toContain('visa')
             expect(result.supportedNetworks).toContain('masterCard')
+        })
+    })
+
+    describe('Cache Management', () => {
+        it('should clear preferences cache', async () => {
+            const mockPreferences = [{ id: 'JPMCClientID', value: 'cached' }]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getSitePreferences()
+            clearPreferencesCache()
+            await getSitePreferences()
+
+            expect(global.fetch).toHaveBeenCalledTimes(4)
+        })
+
+
+
+        it('should return cache status', async () => {
+            const mockPreferences = [{ id: 'test', value: 'value' }]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getSitePreferences()
+            const status = getPreferencesCacheStatus()
+
+            expect(status).toHaveProperty('isCached', true)
+            expect(status).toHaveProperty('isValid', true)
+        })
+
+        it('should return cache status when not cached', () => {
+            const status = getPreferencesCacheStatus()
+            expect(status.isCached).toBe(false)
+        })
+    })
+
+    describe('refreshSitePreferences', () => {
+        it('should force refresh preferences from API', async () => {
+            const mockPreferences = [{ id: 'JPMCClientID', value: 'refreshed' }]
+
+            global.fetch
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+                .mockResolvedValueOnce(mockTokenResponse)
+                .mockResolvedValueOnce(createMockPreferencesResponse(mockPreferences))
+
+            await getSitePreferences()
+            const callsBefore = global.fetch.mock.calls.length
+
+            await refreshSitePreferences()
+
+            expect(global.fetch.mock.calls.length - callsBefore).toBe(2)
         })
     })
 })

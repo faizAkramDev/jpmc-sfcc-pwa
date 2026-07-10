@@ -68,9 +68,9 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
         }
         
         // Build Shopper Baskets API URL
-        const shortCode = process.env.SFCC_SHORT_CODE || process.env.COMMERCE_API_SHORT_CODE
-        const organizationId = process.env.SFCC_ORG_ID || process.env.COMMERCE_API_ORG_ID
-        const siteId = process.env.SFCC_SITE_ID || process.env.COMMERCE_API_SITE_ID || 'RefArchGlobal'
+        const shortCode = process.env.COMMERCE_API_SHORT_CODE || process.env.SFCC_SHORT_CODE
+        const organizationId = process.env.COMMERCE_API_ORG_ID || process.env.SFCC_ORG_ID
+        const siteId = process.env.COMMERCE_API_SITE_ID || process.env.SFCC_SITE_ID
         
         if (!shortCode || !organizationId) {
             logger.error('[PaymentMethods] Missing SFCC configuration')
@@ -147,7 +147,7 @@ export const handleGetAvailablePaymentMethods = async (req, res) => {
             }
         }
         
-        logger.info('[PaymentMethods] Analyzed:', {
+        logger.debug('[PaymentMethods] Analyzed:', {
             isCreditCardActive: availability.isCreditCardActive,
             isGooglePayActive: availability.isGooglePayActive,
             isApplePayActive: applePayActive,

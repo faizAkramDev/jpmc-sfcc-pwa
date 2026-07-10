@@ -35,8 +35,28 @@ describe('attribute-mapping', () => {
     })
 
     describe('DEFAULT_ATTRIBUTE_MAPPING', () => {
-        it('contains c_jpmcTransactionId mapping', () => {
-            expect(DEFAULT_ATTRIBUTE_MAPPING).toHaveProperty('c_jpmcTransactionId', 'transactionId')
+        it('contains c_jpmcTransactionId mapping as function', () => {
+            expect(DEFAULT_ATTRIBUTE_MAPPING).toHaveProperty('c_jpmcTransactionId')
+            expect(typeof DEFAULT_ATTRIBUTE_MAPPING.c_jpmcTransactionId).toBe('function')
+        })
+
+        it('c_jpmcTransactionId extracts transaction ID from response', () => {
+            const mapper = DEFAULT_ATTRIBUTE_MAPPING.c_jpmcTransactionId
+
+            // Test paymentGatewayTransactionId priority
+            expect(mapper({ paymentGatewayTransactionId: 'pgw_12345' })).toBe('pgw_12345')
+
+            // Test transactionId fallback
+            expect(mapper({ transactionId: 'txn_67890' })).toBe('txn_67890')
+
+            // Test paymentGatewayTransactionId takes priority
+            expect(mapper({ 
+                paymentGatewayTransactionId: 'pgw_12345',
+                transactionId: 'txn_67890' 
+            })).toBe('pgw_12345')
+
+            // Test null return when no transaction ID
+            expect(mapper({})).toBeNull()
         })
 
         it('contains c_jpmcCardTypeName mapping as function', () => {
@@ -627,13 +647,6 @@ describe('attribute-mapping', () => {
             expect(logger.warn).toHaveBeenCalled()
         })
     })
-})
-
-// Append fraud tests in a separate describe block
-describe('attribute-mapping - fraud mappings', () => {
-    beforeEach(() => {
-        jest.clearAllMocks()
-    })
 
     describe('mapFraudResponseToOrderAttributes', () => {
         it('maps fraud response to order attributes', () => {
@@ -696,6 +709,25 @@ describe('attribute-mapping - fraud mappings', () => {
             expect(attributes.c_jpmcFraudRiskDecision).toBeDefined()
         })
 
+        it('handles mapper function errors gracefully', () => {
+            const fraudResponse = {
+                transactionId: 'fraud_txn_123',
+                riskElement: {
+                    // Create circular reference to cause JSON.stringify to fail
+                    circular: null
+                }
+            }
+            fraudResponse.riskElement.circular = fraudResponse.riskElement
+
+            const attributes = mapFraudResponseToOrderAttributes(fraudResponse)
+
+            // Should still include other attributes
+            expect(attributes.c_jpmcFraudTransactionId).toBe('fraud_txn_123')
+            // riskElement should be undefined due to JSON.stringify error
+            expect(attributes.c_jpmcFraudRiskElement).toBeUndefined()
+            expect(logger.warn).toHaveBeenCalled()
+        })
+
         it('supports custom mapping for fraud response', () => {
             const fraudResponse = {
                 transactionId: 'fraud_txn_123'
@@ -722,6 +754,7 @@ describe('attribute-mapping - fraud mappings', () => {
 
             const attributes = mapFraudResponseToOrderAttributes(fraudResponse, null, customMapping)
 
+            // Should have both default and custom mappings
             expect(attributes.c_jpmcFraudTransactionId).toBe('fraud_txn_123')
             expect(attributes.c_myCustomField).toBe('myValue')
         })
@@ -731,6 +764,11 @@ describe('attribute-mapping - fraud mappings', () => {
         it('includes c_jpmcFraudRiskElement as function', () => {
             expect(FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING).toHaveProperty('c_jpmcFraudRiskElement')
             expect(typeof FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskElement).toBe('function')
+        })
+
+        it('includes c_jpmcFraudRiskDecision as function', () => {
+            expect(FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING).toHaveProperty('c_jpmcFraudRiskDecision')
+            expect(typeof FRAUD_CHECK_ORDER_ATTRIBUTE_MAPPING.c_jpmcFraudRiskDecision).toBe('function')
         })
 
         it('c_jpmcFraudRiskElement serializes riskElement to JSON', () => {

@@ -12,6 +12,7 @@ export { useJPMCPlaceOrder } from './useJPMCPlaceOrder'
 export { useAvailablePaymentMethods, checkAvailablePaymentMethods } from './useAvailablePaymentMethods'
 export { default as useKount } from './useKount'
 export { useThreeDS } from './useThreeDS'
+export { useDropInPaymentSuccess } from './useDropInPaymentSuccess'
 
 import useJPMorganPayment from './useJPMorganPayment'
 import useGooglePay from './useGooglePay'
@@ -20,6 +21,7 @@ import { useJPMCPlaceOrder } from './useJPMCPlaceOrder'
 import { useAvailablePaymentMethods, checkAvailablePaymentMethods } from './useAvailablePaymentMethods'
 import useKount from './useKount'
 import { useThreeDS } from './useThreeDS'
+import { useDropInPaymentSuccess } from './useDropInPaymentSuccess'
 
 export default {
     useJPMorganPayment,
@@ -29,5 +31,6 @@ export default {
     useAvailablePaymentMethods,
     checkAvailablePaymentMethods,
     useKount,
-    useThreeDS
+    useThreeDS,
+    useDropInPaymentSuccess
 }

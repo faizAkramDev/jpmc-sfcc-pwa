@@ -15,7 +15,6 @@ import logger, { safeStringify } from '../../utils/logger.js'
 import { getJPMCConfigAsync } from '../index.js'
 import { fromMinorUnits } from '../../utils/currency.js'
 import { mapJPMCResponseToAttributes } from '../api/attribute-mapping.js'
-
 /**
  * Cache to track processed callbacks and prevent duplicate processing.
  * JPMC's orchestration may submit the callback form multiple times.
@@ -314,6 +313,7 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
     const orderApi = new OrderApiClient()
 
     if (!isSuccess) {
+        // FAILED 3DS: promote CREATED→FAILED directly — no GET needed.
         await orderApi.updateOrderStatus(orderNo, 'failed')
         if (controllerConfig.debug) {
             logger.info('[3DS Controller] Updated order status to failed:', { orderNo })
@@ -322,7 +322,7 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
     }
 
     // SUCCESS 3DS:
-    // STEP 1: Promote CREATED→NEW first — MUST happen before any GET or PATCH.
+    // STEP 1: Promote CREATED→NEW first — MUST happen before any GET or PATCH
     await orderApi.updateOrderStatus(orderNo, 'new')
     if (controllerConfig.debug) {
         logger.info('[3DS Controller] Updated order status to new:', { orderNo })
@@ -334,18 +334,18 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
     // STEP 3: Get payment instrument for patching
     const paymentInstrument = order.paymentInstruments?.[0]
     const paymentInstrumentId = paymentInstrument?.paymentInstrumentId
-
+    
     if (!paymentInstrumentId) {
         throw new Error('No paymentInstrumentId found - cannot patch PaymentTransaction')
     }
-
+    
     // STEP 4: Build payloads for order and payment transaction patches
     const { paymentTransactionPayload, orderPayload } = buildOrderPatchPayloads(
         paymentDetails, threeDSValues, isSuccess, order.currency
     )
-
+    
     // STEP 4: Patch payment instrument (sets c_jpmcTransactionId, c_jpmcCardTypeName on OrderPaymentInstrument)
-    const piAttributes = mapJPMCResponseToAttributes(paymentDetails)
+     const piAttributes = mapJPMCResponseToAttributes(paymentDetails)
     if (Object.keys(piAttributes).length > 0) {
         await orderApi.patchPaymentInstrument(orderNo, paymentInstrumentId, piAttributes)
     }
@@ -354,9 +354,10 @@ async function updateOrderAfter3DS(orderNo, isSuccess, paymentDetails, threeDSVa
         if (controllerConfig.debug) {
             logger.info('[3DS Controller] Patching PaymentTransaction:', orderNo, paymentInstrumentId)
         }
+        logger.info('[3DS Controller] PaymentTransaction payload:', safeStringify(paymentTransactionPayload))
         await orderApi.patchPaymentTransaction(orderNo, paymentInstrumentId, paymentTransactionPayload)
     }
-
+    
     // STEP 5: Patch order if needed
     if (Object.keys(orderPayload).length > 0) {
         if (controllerConfig.debug) {
@@ -386,7 +387,7 @@ function buildOrderPatchPayloads(paymentDetails, threeDSValues, isSuccess, curre
     const threeDSCompletion = authResult.threeDomainSecureCompletion || {}
 
     const paymentTransactionPayload = {
-        c_jpmcTransactionId: paymentDetails.transactionId,
+        c_jpmcTransactionId: paymentDetails.transactionId, 
         c_jpmcAuthorizationId: paymentDetails.transactionId,
         c_jpmcCaptureMethod: captureMethod,
         c_jpmcAuthTimestamp: paymentDetails.timestamp || new Date().toISOString(),
@@ -650,6 +651,7 @@ export async function handleFail3DSOrder(req, res) {
 
         const orderApi = new OrderApiClient()
 
+        // Guard: check c_pending3DSAuthentication before proceeding.
         try {
             const order = await orderApi.getOrder(orderNo)
             if (!order.c_pending3DSAuthentication) {
@@ -660,6 +662,7 @@ export async function handleFail3DSOrder(req, res) {
                 })
             }
         } catch (err) {
+            // 403 expected when order is still CREATED — proceed with fail logic
             logger.debug('[3DS Controller] Could not GET order for pending check (likely CREATED):', orderNo, err.message)
         }
 
@@ -690,7 +693,7 @@ export async function handleFail3DSOrder(req, res) {
                 await orderApi.updateOrderStatus(orderNo, 'failed')
             } catch (err) {
                 // Swallow — order may already be in a terminal state
-                logger.warn('[3DS Controller] Admin fail fallback:', orderNo, err.message)
+                logger.warn('[3DS Controller] Admin fail fallback after SCAPI:', orderNo, err.message)
             }
         }
 

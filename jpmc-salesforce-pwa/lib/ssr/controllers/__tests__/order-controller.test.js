@@ -224,8 +224,9 @@ describe('order-controller', () => {
         })
 
         it('uses environment variables for API config when not provided in controller config', async () => {
+            // Save original env
             const originalEnv = { ...process.env }
-
+            
             try {
                 process.env.COMMERCE_API_SHORT_CODE = 'test-short'
                 process.env.COMMERCE_API_ORG_ID = 'test-org-id'
@@ -243,6 +244,7 @@ describe('order-controller', () => {
                     json: () => Promise.resolve({ orderNo: 'ORDER123' })
                 })
 
+                // Re-configure controller without commerceConfig to use env vars
                 configureOrderController({ commerceConfig: null })
 
                 await handleCreateOrder(req, res, next)
@@ -252,6 +254,7 @@ describe('order-controller', () => {
                 expect(callURL).toContain('test-org-id')
                 expect(callURL).toContain('test-site')
             } finally {
+                // Restore env
                 process.env = originalEnv
             }
         })

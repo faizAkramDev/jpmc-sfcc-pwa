@@ -22,7 +22,7 @@ import { buildDisplayItemsFromBasket } from '../../client/utils/display-items.js
 const getApiConfig = () => ({
     shortCode: process.env.COMMERCE_API_SHORT_CODE,
     organizationId: process.env.COMMERCE_API_ORG_ID,
-    siteId: process.env.COMMERCE_API_SITE_ID || 'RefArchGlobal'
+    siteId: process.env.COMMERCE_API_SITE_ID || process.env.SFCC_SITE_ID
 })
 
 /**

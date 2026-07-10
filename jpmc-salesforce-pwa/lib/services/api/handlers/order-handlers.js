@@ -68,9 +68,9 @@ export const handleConfirmOrder = async (req, res) => {
         }
         
         // Build Shopper Orders API URL
-        const shortCode = process.env.SFCC_SHORT_CODE || process.env.COMMERCE_API_SHORT_CODE
-        const organizationId = process.env.SFCC_ORG_ID || process.env.COMMERCE_API_ORG_ID
-        const siteId = process.env.SFCC_SITE_ID || process.env.COMMERCE_API_SITE_ID || 'RefArchGlobal'
+        const shortCode = process.env.COMMERCE_API_SHORT_CODE || process.env.SFCC_SHORT_CODE
+        const organizationId = process.env.COMMERCE_API_ORG_ID || process.env.SFCC_ORG_ID
+        const siteId = process.env.COMMERCE_API_SITE_ID || process.env.SFCC_SITE_ID
         
         if (!shortCode || !organizationId) {
             logger.error('[OrderConfirm] Missing SFCC configuration:', { shortCode: !!shortCode, organizationId: !!organizationId })
@@ -229,9 +229,9 @@ export const handlePatchOrderPaymentInstrument = async (req, res) => {
         
         // Build Shopper Orders API URL
         // Format: https://{shortCode}.api.commercecloud.salesforce.com/checkout/shopper-orders/v1/organizations/{orgId}/orders/{orderNo}/payment-instruments/{paymentInstrumentId}
-        const shortCode = process.env.SFCC_SHORT_CODE || process.env.COMMERCE_API_SHORT_CODE
-        const organizationId = process.env.SFCC_ORG_ID || process.env.COMMERCE_API_ORG_ID
-        const siteId = process.env.SFCC_SITE_ID || process.env.COMMERCE_API_SITE_ID || 'RefArchGlobal'
+        const shortCode = process.env.COMMERCE_API_SHORT_CODE || process.env.SFCC_SHORT_CODE
+        const organizationId = process.env.COMMERCE_API_ORG_ID || process.env.SFCC_ORG_ID
+        const siteId = process.env.COMMERCE_API_SITE_ID || process.env.SFCC_SITE_ID
         
         if (!shortCode || !organizationId) {
             logger.error('[OrderPatching] Missing SFCC configuration:', { shortCode: !!shortCode, organizationId: !!organizationId })

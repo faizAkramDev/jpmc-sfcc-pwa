@@ -56,6 +56,7 @@ export { default as useGooglePay } from './hooks/useGooglePay'
 export { default as useApplePay } from './hooks/useApplePay'
 export { useJPMCPlaceOrder } from './hooks/useJPMCPlaceOrder'
 export { useAvailablePaymentMethods, checkAvailablePaymentMethods } from './hooks/useAvailablePaymentMethods'
+export { useDropInPaymentSuccess } from './hooks/useDropInPaymentSuccess'
 
 
 // =============================================================================
@@ -112,6 +113,14 @@ export {
     maskCardNumber,
     luhnCheck
 } from './utils/validation'
+
+// Drop-in UI payload normalizer
+// Handles payload format variants from the Drop-in SDK
+export {
+    normalizeDropInPayload,
+    isPaymentSuccessful,
+    isThreeDSDeferred
+} from './utils/drop-in-payload-normalizer'
 
 // Error handling utilities
 export {

@@ -37,6 +37,14 @@ jest.mock('../../../services/api/helpers/threeds-helpers', () => {
     }
 })
 
+jest.mock('../../api/attribute-mapping.js', () => ({
+    mapJPMCResponseToAttributes: jest.fn(() => ({}))
+}))
+
+jest.mock('../../../ssr/index.js', () => ({
+    getJPMCConfigAsync: jest.fn()
+}))
+
 jest.mock('../../../utils/logger.js', () => ({
     __esModule: true,
     default: {
@@ -56,17 +64,14 @@ import {
     clearCallbackCache
 } from '../threeds-controller'
 import { getPaymentDetails } from '../../../services/api/payment-api'
-import { extract3DSValues, build3DSOrderPatchPayload } from '../../../services/api/helpers/threeds-helpers'
+import { extract3DSValues } from '../../../services/api/helpers/threeds-helpers'
+import { getJPMCConfigAsync } from '../../../ssr/index.js'
 
 // Helper to create mock request/response
 const createMockReqRes = (overrides = {}) => {
     const req = {
         query: {},
         body: {},
-        headers: {
-            host: 'localhost:3000',
-            'x-forwarded-proto': 'https'
-        },
         ...overrides.req,
         headers: {
             host: 'localhost:3000',
@@ -117,6 +122,7 @@ describe('threeds-controller', () => {
         mockGetOrder.mockResolvedValue({
             orderNo: 'ORDER123',
             c_pending3DSAuthentication: true,
+            currency: 'USD',
             paymentInstruments: [
                 { paymentInstrumentId: 'pi-123' }
             ]
@@ -125,6 +131,10 @@ describe('threeds-controller', () => {
         getPaymentDetails.mockResolvedValue({
             success: true,
             responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS,
+            transactionId: 'txn-123',
+            amount: 10000,
+            captureMethod: 'NOW',
+            timestamp: '2024-01-01T00:00:00Z',
             paymentAuthenticationResult: {
                 authenticationId: 'auth-123',
                 authenticationValue: 'CAVV-xyz',
@@ -134,6 +144,11 @@ describe('threeds-controller', () => {
                     electronicCommerceIndicator: '05'
                 }
             }
+        })
+        
+        getJPMCConfigAsync.mockResolvedValue({
+            environment: 'sandbox',
+            merchantId: 'TEST_MERCHANT'
         })
     })
 
@@ -502,6 +517,81 @@ describe('threeds-controller', () => {
         })
 
         describe('Payment Transaction Patching', () => {
+            it('should patch payment transaction with auth details', async () => {
+                getPaymentDetails.mockResolvedValue({
+                    success: true,
+                    responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS,
+                    transactionId: 'txn-123',
+                    amount: 10000,
+                    captureMethod: 'NOW',
+                    timestamp: '2024-01-01T00:00:00Z',
+                    paymentAuthenticationResult: {
+                        authenticationId: 'auth-123',
+                        authenticationValue: 'CAVV-xyz',
+                        threeDomainSecureCompletion: {
+                            threeDSDirectoryServerTransactionId: 'dsTransId-456',
+                            threeDSTransactionStatus: 'Y',
+                            electronicCommerceIndicator: '05'
+                        }
+                    }
+                })
+
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                expect(mockPatchPaymentTransaction).toHaveBeenCalledWith(
+                    'ORDER123',
+                    'pi-123',
+                    expect.objectContaining({
+                        c_jpmcAuthorizationId: 'txn-123',
+                        c_jpmcCaptureMethod: 'NOW',
+                        c_jpmcPaymentStatus: 'AC'
+                    })
+                )
+            })
+
+            it('should set correct payment status for MANUAL capture', async () => {
+                getPaymentDetails.mockResolvedValue({
+                    success: true,
+                    responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS,
+                    transactionId: 'txn-123',
+                    amount: 10000,
+                    captureMethod: 'MANUAL',
+                    paymentAuthenticationResult: {}
+                })
+
+                const { req, res } = createMockReqRes({
+                    req: {
+                        query: { orderNo: 'ORDER123', orderToken: 'TOKEN456' },
+                        body: {
+                            paymentRequestId: 'payment-req-123',
+                            responseStatus: THREE_DS.RESPONSE_STATUS.SUCCESS
+                        }
+                    }
+                })
+
+                await handle3DSCallback(req, res)
+
+                expect(mockPatchPaymentTransaction).toHaveBeenCalledWith(
+                    'ORDER123',
+                    'pi-123',
+                    expect.objectContaining({
+                        c_jpmcPaymentStatus: 'A',
+                        c_jpmcCapturedAmount: 0,
+                        c_jpmcRemainingAuthAmount: 100
+                    })
+                )
+            })
+
             it('should handle missing payment instrument gracefully', async () => {
                 mockGetOrder.mockResolvedValue({
                     orderNo: 'ORDER123',
@@ -816,6 +906,7 @@ describe('threeds-controller', () => {
                 })
             })
         })
+
 
     })
 

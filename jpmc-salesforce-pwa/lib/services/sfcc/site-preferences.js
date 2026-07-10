@@ -149,7 +149,7 @@ const fetchPreferencesFromAPI = async (sfccConfig, accessToken) => {
         `/configuration/preferences/v1/organizations/${orgId}` +
         `/site-custom-preferences?siteId=${siteId}`
 
-    logger.info('[SFCC Preferences] Fetching from:', apiUrl)
+    logger.debug('[SFCC Preferences] Fetching from:', apiUrl)
 
     const response = await fetch(apiUrl, {
         method: 'GET',
@@ -268,10 +268,6 @@ export const getSitePreferences = async (options = {}) => {
  * @returns {Promise<Object>} Object with preference IDs as keys
  * @throws {Error} If API request fails
  * 
- * @example
- * const jpmcPrefs = await getJPMCPreferences()
- * console.log('Client ID:', jpmcPrefs.JPMCClientID)
- * console.log('Merchant ID:', jpmcPrefs.JPMC_MerchantCode)
  */
 export const getJPMCPreferences = async (options = {}) => {
     const { forceRefresh = false } = options

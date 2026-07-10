@@ -30,6 +30,14 @@ const getServerConfigAsync = async (req) => {
     const locale = extractLocale(req)
     const slasToken = extractSlasToken(req)
     
+    logger.debug('[Config Handler] Extracted from request:', {
+        locale: locale || 'NOT_FOUND_IN_REQUEST',
+        localeSource: 'query param, body param, or Referer header',
+        hasSlasToken: !!slasToken,
+        requestMethod: req?.method,
+        requestUrl: req?.originalUrl
+    })
+    
     return getJPMCConfigAsync({ locale, slasToken })
 }
 
@@ -168,6 +176,16 @@ export const handleGetConfig = async (req, res) => {
         
         const merchantId = config.merchantId
 
+        // Validate Drop-in configuration if enabled
+        if (config.checkoutMode === 'DROP_IN') {
+            if (!config.dropInScriptUrl) {
+                logger.error('[Config Handler] Drop-in Mode Enabled BUT JPMCDropInScriptUrl NOT configured in BM')
+            }
+            if (!config.captureMethod) {
+                logger.error('[Config Handler] Drop-in Mode Enabled BUT JPMCCaptureMethod NOT configured in BM')
+            }
+        }
+
         // Only return client-safe config
         const clientConfig = {
             merchantId: merchantId, // Merchant ID for PIE encryption SDK
@@ -177,8 +195,26 @@ export const handleGetConfig = async (req, res) => {
                 getKey: (pieBaseUrl && pieKey) ? `${pieBaseUrl}/${pieKey}/getkey.js` : undefined
             },
             // Payment form configuration
-            captureMethod: config.captureMethod // From BM site preferences (required)
+            supportedCardBrands: ['visa', 'mastercard', 'amex', 'discover'],
+            captureMethod: config.captureMethod, // From BM site preferences (required)
+            // Drop-in UI configuration
+            checkoutMode: config.checkoutMode || 'PIE', // 'PIE' or 'DROP_IN' from JPMCCheckoutMode BM preference
+            dropInScriptUrl: config.dropInScriptUrl || null,
+            // For backward compatibility, also return dropInEnabled as boolean
+            dropInEnabled: config.checkoutMode === 'DROP_IN'
         }
+
+        // Log configuration being returned
+        logger.debug('[Config Handler] Returning Payment Configuration:', {
+            checkoutMode: clientConfig.checkoutMode,
+            dropInEnabled: clientConfig.dropInEnabled,
+            dropInScriptUrl: clientConfig.dropInScriptUrl ? 'Configured' : 'NOT_SET',
+            merchantId: merchantId ? 'SET' : 'NOT_SET',
+            hasPIEUrls: !!(pieEncryptionUrl && pieBaseUrl),
+            configSource: config._configSource || 'unknown',
+            locale: config._locale || 'default',
+            note: `Drop-in ${clientConfig.dropInEnabled ? 'ENABLED' : 'DISABLED'} for locale "${config._locale || 'default'}" (source: ${config._configSource || 'sitePreferences'})`
+        })
 
         return res.status(200).json(clientConfig)
     } catch (error) {
@@ -271,16 +307,16 @@ export const handleGetGooglePayConfig = async (req, res) => {
         const allowedShippingCountries = parseAllowedShippingCountries(config.googlePayAllowedShippingCountries)
         
         logger.info('[JPMC Google Pay] Configuration loaded from BM:')
-        logger.info('[JPMC Google Pay]   - Environment:', googlePayEnvironment)
-        logger.info('[JPMC Google Pay]   - Gateway:', gateway)
-        logger.info('[JPMC Google Pay]   - Gateway Merchant ID:', gatewayMerchantId)
-        logger.info('[JPMC Google Pay]   - Merchant Name:', googlePayMerchantName)
-        logger.info('[JPMC Google Pay]   - Google Merchant ID:', googlePayMerchantId || 'not set (TEST mode)')
-        logger.info('[JPMC Google Pay]   - Allowed Networks:', allowedCardNetworks.join(', '))
-        logger.info('[JPMC Google Pay]   - Allowed Auth Methods:', allowedAuthMethods.join(', '))
-        logger.info('[JPMC Google Pay]   - Cart Enabled:', cartEnabled)
-        logger.info('[JPMC Google Pay]   - PDP Enabled:', pdpEnabled)
-        logger.info('[JPMC Google Pay]   - Allowed Shipping Countries:', allowedShippingCountries.join(', ') || 'not configured')
+        logger.debug('[JPMC Google Pay]   - Environment:', googlePayEnvironment)
+        logger.debug('[JPMC Google Pay]   - Gateway:', gateway)
+        logger.debug('[JPMC Google Pay]   - Gateway Merchant ID:', gatewayMerchantId)
+        logger.debug('[JPMC Google Pay]   - Merchant Name:', googlePayMerchantName)
+        logger.debug('[JPMC Google Pay]   - Google Merchant ID:', googlePayMerchantId || 'not set (TEST mode)')
+        logger.debug('[JPMC Google Pay]   - Allowed Networks:', allowedCardNetworks.join(', '))
+        logger.debug('[JPMC Google Pay]   - Allowed Auth Methods:', allowedAuthMethods.join(', '))
+        logger.debug('[JPMC Google Pay]   - Cart Enabled:', cartEnabled)
+        logger.debug('[JPMC Google Pay]   - PDP Enabled:', pdpEnabled)
+        logger.debug('[JPMC Google Pay]   - Allowed Shipping Countries:', allowedShippingCountries.join(', ') || 'not configured')
         
         // Build Google Pay configuration
         const googlePayConfig = {
@@ -422,12 +458,12 @@ export const handleGetApplePayConfig = async (req, res) => {
         const configSource = applePayPrefs._source === 'env' ? 'environment variables' : 'SFCC Site Preferences'
         
         logger.info(`[JPMC Apple Pay] Configuration loaded from ${configSource}:`)
-        logger.info('[JPMC Apple Pay]   - Enabled:', applePayPrefs.enabled)
-        logger.info('[JPMC Apple Pay]   - Merchant ID:', applePayPrefs.merchantId)
-        logger.info('[JPMC Apple Pay]   - Display Name:', applePayPrefs.merchantName || 'not set')
-        logger.info('[JPMC Apple Pay]   - Supported Networks:', supportedNetworks.join(', '))
-        logger.info('[JPMC Apple Pay]   - Merchant Capabilities:', merchantCapabilities.join(', '))
-        logger.info('[JPMC Apple Pay]   - Environment:', environment)
+        logger.debug('[JPMC Apple Pay]   - Enabled:', applePayPrefs.enabled)
+        logger.debug('[JPMC Apple Pay]   - Merchant ID:', applePayPrefs.merchantId)
+        logger.debug('[JPMC Apple Pay]   - Display Name:', applePayPrefs.merchantName || 'not set')
+        logger.debug('[JPMC Apple Pay]   - Supported Networks:', supportedNetworks.join(', '))
+        logger.debug('[JPMC Apple Pay]   - Merchant Capabilities:', merchantCapabilities.join(', '))
+        logger.debug('[JPMC Apple Pay]   - Environment:', environment)
         
         // Build Apple Pay configuration (client-safe - no secrets)
         const applePayConfig = {

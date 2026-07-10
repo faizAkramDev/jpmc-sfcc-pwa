@@ -79,7 +79,7 @@ describe('rate-limit.js', () => {
 
     describe('createRateLimiter', () => {
         it('creates rate limiter with default options', () => {
-            const limiter = createRateLimiter()
+            const _limiter = createRateLimiter()
 
             expect(rateLimit).toHaveBeenCalledWith(expect.objectContaining({
                 windowMs: 60000,

@@ -48,6 +48,8 @@ import {
     handleFail3DSOrder
 } from './controllers/threeds-controller'
 
+import { handleDropInCreateSession, handleDropInGetIntent } from './controllers/dropin-controller'
+
 import { applyRateLimiting } from './middleware/rate-limit.js'
 import bodyParser from 'body-parser'
 
@@ -178,7 +180,11 @@ export function registerJPMCEndpoints(app, runtime, config = {}) {
         // 3D Secure handlers
         // urlencodedParser is needed because JPMC POSTs form-urlencoded data to the callback
         threeDSCallback: [urlencodedParser, handle3DSCallback],
-        fail3DSOrder: [handleFail3DSOrder, SuccessHandler]
+        fail3DSOrder: [handleFail3DSOrder, SuccessHandler],
+        // Drop-in UI handlers
+        dropInCreateSession: [handleDropInCreateSession],
+        dropInGetIntent: [handleDropInGetIntent]
+        // Google Pay Cart/PDP handlers removed - integrators handle basket operations directly
     }
 
     // Merge with overrides
@@ -214,14 +220,26 @@ export function registerJPMCEndpoints(app, runtime, config = {}) {
     app.post(`${basePath}/verify`, ...handlers.verify)
 
     // ==========================================================================
-    // Order Management Endpoints (Server-side)
+    // Drop-in UI Endpoint
     // ==========================================================================
 
     /**
-     * POST /api/jpmorgan/order/create
-     * Creates an SFCC order server-side from a basket.
-     * Used by PIE, Google Pay, and Apple Pay flows for locale-aware order creation.
+     * POST /api/jpmorgan/dropin/create-session
+     * Create a JPMC checkout session token for the Drop-in UI (initial mount).
      */
+    app.post(`${basePath}/dropin/create-session`, ...handlers.dropInCreateSession)
+
+    /**
+     * POST /api/jpmorgan/dropin/get-intent
+     * Refresh checkout session token on payment step re-entry.
+     * Validates basket (items, shipping) and reuses reserved order number.
+     */
+    app.post(`${basePath}/dropin/get-intent`, ...handlers.dropInGetIntent)
+
+    // ==========================================================================
+    // Order Management Endpoints (Server-side)
+    // ==========================================================================
+    
     app.post(`${basePath}/order/create`, ...handlers.createOrder)
 
     /**

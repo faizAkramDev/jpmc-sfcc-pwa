@@ -17,7 +17,10 @@ const DEFAULT_GOOGLE_PAY_METHOD_ID = 'JPMC_GOOGLE_PAY'
 const DEFAULT_CREDIT_CARD_METHOD_ID = 'CREDIT_CARD'
 const DEFAULT_APPLE_PAY_METHOD_ID = 'DW_APPLE_PAY'
 
-// Cache for default locale from sites.js
+/**
+ * Cache for default locale - prevents repeated sites.js resolution
+ * @type {string|null}
+ */
 let cachedDefaultLocale = null
 
 /**
@@ -35,7 +38,7 @@ const resolveSitesConfig = () => {
     
     for (const path of possiblePaths) {
         try {
-            // eslint-disable-next-line @typescript-eslint/no-var-requires, global-require
+            // eslint-disable-next-line global-require
             const sites = require(path)
             if (sites && (Array.isArray(sites) || typeof sites === 'object')) {
                 return sites
@@ -51,7 +54,8 @@ const resolveSitesConfig = () => {
 /**
  * Get the default locale from sites.js configuration
  * Apple Pay is ONLY supported for the default locale
- * @returns {string} Default locale (e.g., 'en-US')
+ * @param {string} defaultLocale - Default locale passed from consumer (e.g., 'en-US')
+ * @returns {string} Default locale
  */
 const getDefaultLocale = () => {
     // Return cached value if already loaded
@@ -90,7 +94,7 @@ const getDefaultLocale = () => {
  * Apple Pay does NOT support multi-locale configuration
  * Normalizes locale formats (en-US vs en_US)
  * @param {string} locale - Locale to check (e.g., 'en-CA', 'en_CA')
- * @param {string} defaultLocale - Default locale passed from consumer (e.g., 'en-US')
+ * @param {string} defaultLocale - Default locale (e.g., 'en-US')
  * @returns {boolean} True if locale is the default locale
  */
 const isDefaultLocale = (locale, defaultLocale) => {
@@ -114,7 +118,7 @@ const isDefaultLocale = (locale, defaultLocale) => {
  * @param {boolean} options.isGooglePayReady - Google Pay SDK ready state
  * @param {boolean} options.isGooglePayAvailable - Google Pay browser availability
  * @param {string} options.locale - Locale ID for multi-MID support (e.g., 'en_CA')
- * @param {string} options.defaultLocale - Default locale (e.g., 'en-US') — optional, defaults to 'en-US'
+ * @param {string} options.defaultLocale - Default locale (e.g., 'en-US') - optional, defaults to 'en-US'
  * @returns {object} Payment methods state and derived values
  */
 export function usePaymentMethods({
@@ -149,6 +153,17 @@ export function usePaymentMethods({
     useEffect(() => {
         // Skip if no basket, already fetched for this basket+locale, or SSR
         if (!basketId || typeof window === 'undefined') {
+            setActivePaymentMethods(prev =>
+                prev.isLoading
+                    ? {
+                          ...prev,
+                          isCreditCardActive: true,
+                          isGooglePayActive: true,
+                          isApplePayActive: true,
+                          isLoading: false
+                      }
+                    : prev
+            )
             return
         }
         

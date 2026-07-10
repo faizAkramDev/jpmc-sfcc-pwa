@@ -384,8 +384,8 @@ export function isCardMasked(cardData) {
     
     if (!cardNumber) return true
     
-    if (/[\*Xx]{4,}/.test(cardNumber)) return true
-    if (/^[\*Xx\s\-]+\d{4}$/.test(cardNumber)) return true
+    if (/[*Xx]{4,}/.test(cardNumber)) return true
+    if (/^[*Xx\s-]+\d{4}$/.test(cardNumber)) return true
     if (cardNumber.length <= 4) return true
     
     return false

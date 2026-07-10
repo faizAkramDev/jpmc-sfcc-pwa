@@ -6,7 +6,6 @@
  * @module services/api/helpers/request-helpers
  */
 
-import logger from '../../../utils/logger'
 import { MERCHANT_SOFTWARE } from '../../../utils/constants/misc-constants'
 import { PHONE_COUNTRY_CODES } from '../../../utils/constants.mjs'
 

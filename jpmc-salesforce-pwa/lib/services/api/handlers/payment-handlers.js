@@ -476,6 +476,7 @@ const patchOrderFor3DSPending = async ({ orderNo, paymentResponse, merchantId, f
         const orderApi = new OrderApiClient()
         const authResult = paymentResponse.paymentAuthenticationResult || {}
         
+        
         const patchPayload = {
             c_jpmcMerchantId: merchantId || null,
             c_pending3DSAuthentication: true,
