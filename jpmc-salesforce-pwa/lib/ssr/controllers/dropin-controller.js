@@ -223,6 +223,11 @@ export const handleDropInCreateSession = async (req, res) => {
             }
         }
 
+        if (isRegisteredCustomer) {
+            payload.checkoutOptions.cardOnFile = {
+                transactionType: 'COF_TRANSACTION_TYPE_UNSCHEDULED'
+            }
+        }
         if (saveConsumerProfile && isRegisteredCustomer) {
             payload.checkoutOptions.consumerProfileOptions = { isSaveConsumerProfile: true }
         }
@@ -233,19 +238,48 @@ export const handleDropInCreateSession = async (req, res) => {
             if (jpmcProfileId) payload.consumer.consumerProfileId = jpmcProfileId
         }
 
+        const maskedPayload = {
+            ...payload,
+            consumer: payload.consumer ? {
+                ...payload.consumer,
+                email: payload.consumer.email
+                    ? payload.consumer.email.replace(/^(.{2})[^@]*(@.*)$/, '$1***$2')
+                    : undefined,
+                recipientFullName: payload.consumer.recipientFullName
+                    ? payload.consumer.recipientFullName.replace(/\S+/g, (w) => w[0] + '*'.repeat(w.length - 1))
+                    : undefined
+            } : undefined
+        }
+
+        logger.debug('[DropIn] /checkout/intent request', {
+            url: checkoutIntentUrl,
+            merchantOrderNumber: payload.merchantOrderNumber,
+            currencyCode: payload.currencyCode,
+            isRegisteredCustomer,
+            cardOnFile: payload.checkoutOptions.cardOnFile || null,
+            payload: JSON.stringify(maskedPayload)
+        })
+
         const response = await fetch(checkoutIntentUrl, {
             method: 'POST',
             headers,
             body: JSON.stringify(payload)
         })
 
+        const responseText = await response.text()
+
         if (!response.ok) {
-            const errBody = await response.text()
-            logger.error('[DropIn] /checkout/intent failed', { status: response.status, body: errBody })
+            logger.error('[DropIn] /checkout/intent failed', { status: response.status, body: responseText })
             return res.status(502).json({ success: false, error: 'Failed to create checkout session with JPMC.' })
         }
 
-        const data = await response.json()
+        let data
+        try {
+            data = JSON.parse(responseText)
+        } catch (parseErr) {
+            logger.error('[DropIn] /checkout/intent non-JSON response', { body: responseText })
+            return res.status(502).json({ success: false, error: 'Failed to create checkout session with JPMC.' })
+        }
         const { checkoutSessionToken } = data
 
         if (!checkoutSessionToken) {

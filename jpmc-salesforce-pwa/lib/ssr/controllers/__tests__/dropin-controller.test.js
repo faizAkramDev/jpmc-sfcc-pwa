@@ -56,7 +56,11 @@ describe('DropIn Controller', () => {
         }
 
         global.fetch = jest.fn()
-        global.crypto = { randomUUID: jest.fn(() => 'test-uuid-test-uuid-test') }
+        Object.defineProperty(global, 'crypto', {
+            value: { randomUUID: jest.fn(() => 'test-uuid-test-uuid-test') },
+            configurable: true,
+            writable: true
+        })
         
         process.env.COMMERCE_API_SHORT_CODE = 'short-code'
         process.env.COMMERCE_API_ORG_ID = 'org-id'
@@ -239,7 +243,7 @@ describe('DropIn Controller', () => {
             getAccessToken.mockResolvedValue('access-token-123')
             global.fetch.mockResolvedValueOnce({
                 ok: true,
-                json: async () => ({ checkoutSessionToken: 'token-123' })
+                text: async () => JSON.stringify({ checkoutSessionToken: 'token-123' })
             })
 
             mockReq.body = {
@@ -295,6 +299,81 @@ describe('DropIn Controller', () => {
 
             expect(mockRes.status).toHaveBeenCalledWith(500)
             expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({ success: false }))
+        })
+
+        test('includes cardOnFile in payload for registered customers in DROP_IN mode', async () => {
+            getJPMCConfigAsync.mockResolvedValue(defaultConfig)
+            getAccessToken.mockResolvedValue('access-token-123')
+            getSequenceNumber.mockResolvedValue({ sequenceNumber: 'ORD-123' })
+
+            getBasket.mockResolvedValue({
+                customerInfo: { customerNo: 'C001', customerId: 'cust-abc' },
+                currency: 'USD',
+                orderTotal: 100
+            })
+
+            // Use URL-based dispatch so we don't rely on exact call order indexing
+            let capturedIntentBody = null
+            global.fetch = jest.fn().mockImplementation(async (url, options) => {
+                if (url && url.includes('shopper-customers')) {
+                    return { ok: true, json: async () => ({ email: 'user@example.com', firstName: 'John', lastName: 'Doe' }) }
+                }
+                if (url && url.includes('checkout/intent')) {
+                    capturedIntentBody = options?.body ? JSON.parse(options.body) : null
+                    return { ok: true, text: async () => JSON.stringify({ checkoutSessionToken: 'token-cof-registered' }) }
+                }
+                // SCAPI PATCH calls (reservedOrderNo, persistIntentState)
+                return { ok: true }
+            })
+
+            mockReq.body = {
+                basketId: 'basket-123',
+                currencyCode: 'USD',
+                totalTransactionAmount: 100
+            }
+
+            await handleDropInCreateSession(mockReq, mockRes)
+
+            expect(capturedIntentBody).not.toBeNull()
+            expect(capturedIntentBody.checkoutOptions.cardOnFile).toEqual({
+                transactionType: 'COF_TRANSACTION_TYPE_UNSCHEDULED'
+            })
+            expect(mockRes.status).toHaveBeenCalledWith(200)
+        })
+
+        test('does NOT include cardOnFile for guest customers in DROP_IN mode', async () => {
+            getJPMCConfigAsync.mockResolvedValue(defaultConfig)
+            getAccessToken.mockResolvedValue('access-token-456')
+            getSequenceNumber.mockResolvedValue({ sequenceNumber: 'ORD-456' })
+
+            // Guest basket — no customerNo
+            getBasket.mockResolvedValue({
+                customerInfo: { customerId: 'guest-xyz' },
+                currency: 'USD',
+                orderTotal: 50
+            })
+
+            let capturedIntentBody = null
+            global.fetch = jest.fn().mockImplementation(async (url, options) => {
+                if (url && url.includes('checkout/intent')) {
+                    capturedIntentBody = options?.body ? JSON.parse(options.body) : null
+                    return { ok: true, text: async () => JSON.stringify({ checkoutSessionToken: 'token-guest' }) }
+                }
+                // SCAPI PATCH calls
+                return { ok: true }
+            })
+
+            mockReq.body = {
+                basketId: 'basket-456',
+                currencyCode: 'USD',
+                totalTransactionAmount: 50
+            }
+
+            await handleDropInCreateSession(mockReq, mockRes)
+
+            expect(capturedIntentBody).not.toBeNull()
+            expect(capturedIntentBody.checkoutOptions.cardOnFile).toBeUndefined()
+            expect(mockRes.status).toHaveBeenCalledWith(200)
         })
     })
 
